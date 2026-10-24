@@ -188,3 +188,5 @@ label.field textarea { min-height: 96px; font-size: 14px; }
 #toast.show { opacity: 1; }
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+details summary { min-height: 44px; display: flex; align-items: center; color: var(--sub); font-weight: 600; cursor: pointer; }
