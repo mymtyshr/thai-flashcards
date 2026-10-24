@@ -9,23 +9,42 @@
   const KEY = 'thai-my-phrases.v1';
   const DEFAULT_CATS = ['挨拶', 'レストラン', 'ホテル', '買い物', '移動'];
 
+  // [日本語, タイ語, カタカナ, カテゴリー, 単語分解（タイ語＝和訳＝発音記号＝カタカナ；…）]
   const SEED = [
-    ['こんにちは', 'สวัสดีครับ', 'サワッディー クラップ', '挨拶'],
-    ['ありがとう', 'ขอบคุณครับ', 'コープクン クラップ', '挨拶'],
-    ['これください', 'เอาอันนี้ครับ', 'アオ アンニー クラップ', '買い物'],
-    ['お会計お願いします', 'เช็คบิลด้วยครับ', 'チェックビン ドゥアイ クラップ', 'レストラン'],
-    ['いくらですか？', 'ราคาเท่าไหร่ครับ', 'ラーカー タオライ クラップ', '買い物'],
-    ['すみません', 'ขอโทษครับ', 'コートーッ クラップ', '挨拶'],
-    ['はい／そうです', 'ใช่ครับ', 'チャイ クラップ', '挨拶'],
-    ['いいえ／違います', 'ไม่ใช่ครับ', 'マイ チャイ クラップ', '挨拶'],
-    ['トイレはどこですか？', 'ห้องน้ำอยู่ที่ไหนครับ', 'ホンナーム ユー ティーナイ クラップ', '移動'],
-    ['ここに行きたいです', 'อยากไปที่นี่ครับ', 'ヤーク パイ ティーニー クラップ', '移動'],
-    ['チェックインしたいです', 'ขอเช็คอินครับ', 'コー チェックイン クラップ', 'ホテル'],
-    ['辛くしないでください', 'ไม่เผ็ดครับ', 'マイ ペッ クラップ', 'レストラン'],
-    ['水をください', 'ขอน้ำเปล่าครับ', 'コー ナーム プラーオ クラップ', 'レストラン'],
-    ['少し安くできますか？', 'ลดหน่อยได้ไหมครับ', 'ロッ ノイ ダイ マイ クラップ', '買い物'],
-    ['英語を話せますか？', 'พูดภาษาอังกฤษได้ไหมครับ', 'プーッ パーサー アングリッ ダイ マイ クラップ', '挨拶'],
+    ['こんにちは', 'สวัสดีครับ', 'サワッディー クラップ', '挨拶', 'สวัสดี＝こんにちは＝sà.wàt̚.diː＝サワッディー；ครับ＝（男性の丁寧な語尾）＝kʰráp̚＝クラップ'],
+    ['ありがとう', 'ขอบคุณครับ', 'コープクン クラップ', '挨拶', 'ขอบคุณ＝ありがとう＝kʰɔ̀ːp̚.kʰun＝コープクン；ครับ＝（男性の丁寧な語尾）＝kʰráp̚＝クラップ'],
+    ['これください', 'เอาอันนี้ครับ', 'アオ アンニー クラップ', '買い物', 'เอา＝欲しい・取る＝ʔaw＝アオ；อันนี้＝これ＝ʔan.níː＝アンニー；ครับ＝（男性の丁寧な語尾）＝kʰráp̚＝クラップ'],
+    ['お会計お願いします', 'เช็คบิลด้วยครับ', 'チェックビン ドゥアイ クラップ', 'レストラン', 'เช็คบิล＝お会計＝tɕʰék̚.bin＝チェックビン；ด้วย＝〜をお願い（〜も）＝dûaj＝ドゥアイ；ครับ＝（男性の丁寧な語尾）＝kʰráp̚＝クラップ'],
+    ['いくらですか？', 'ราคาเท่าไหร่ครับ', 'ラーカー タオライ クラップ', '買い物', 'ราคา＝値段＝raː.kʰaː＝ラーカー；เท่าไหร่＝いくら＝tʰâw.rài＝タオライ；ครับ＝（男性の丁寧な語尾）＝kʰráp̚＝クラップ'],
+    ['すみません', 'ขอโทษครับ', 'コートーッ クラップ', '挨拶', 'ขอโทษ＝すみません・ごめんなさい＝kʰɔ̌ː.tʰôːt̚＝コートーッ；ครับ＝（男性の丁寧な語尾）＝kʰráp̚＝クラップ'],
+    ['はい／そうです', 'ใช่ครับ', 'チャイ クラップ', '挨拶', 'ใช่＝そう・はい＝tɕʰâj＝チャイ；ครับ＝（男性の丁寧な語尾）＝kʰráp̚＝クラップ'],
+    ['いいえ／違います', 'ไม่ใช่ครับ', 'マイ チャイ クラップ', '挨拶', 'ไม่＝〜ない＝mâj＝マイ；ใช่＝そう＝tɕʰâj＝チャイ；ครับ＝（男性の丁寧な語尾）＝kʰráp̚＝クラップ'],
+    ['トイレはどこですか？', 'ห้องน้ำอยู่ที่ไหนครับ', 'ホンナーム ユー ティーナイ クラップ', '移動', 'ห้องน้ำ＝トイレ＝hɔ̂ŋ.náːm＝ホンナーム；อยู่＝ある・いる＝jùː＝ユー；ที่ไหน＝どこ＝tʰîː.nǎj＝ティーナイ；ครับ＝（男性の丁寧な語尾）＝kʰráp̚＝クラップ'],
+    ['ここに行きたいです', 'อยากไปที่นี่ครับ', 'ヤーク パイ ティーニー クラップ', '移動', 'อยาก＝〜したい＝jàːk̚＝ヤーク；ไป＝行く＝paj＝パイ；ที่นี่＝ここ＝tʰîː.nîː＝ティーニー；ครับ＝（男性の丁寧な語尾）＝kʰráp̚＝クラップ'],
+    ['チェックインしたいです', 'ขอเช็คอินครับ', 'コー チェックイン クラップ', 'ホテル', 'ขอ＝〜させてください＝kʰɔ̌ː＝コー；เช็คอิน＝チェックイン＝tɕʰék̚.ʔin＝チェックイン；ครับ＝（男性の丁寧な語尾）＝kʰráp̚＝クラップ'],
+    ['辛くしないでください', 'ไม่เผ็ดครับ', 'マイ ペッ クラップ', 'レストラン', 'ไม่＝〜ない＝mâj＝マイ；เผ็ด＝辛い＝pʰèt̚＝ペッ；ครับ＝（男性の丁寧な語尾）＝kʰráp̚＝クラップ'],
+    ['水をください', 'ขอน้ำเปล่าครับ', 'コー ナーム プラーオ クラップ', 'レストラン', 'ขอ＝〜をください＝kʰɔ̌ː＝コー；น้ำเปล่า＝水（ふつうの飲み水）＝náːm.plàw＝ナームプラーオ；ครับ＝（男性の丁寧な語尾）＝kʰráp̚＝クラップ'],
+    ['少し安くできますか？', 'ลดหน่อยได้ไหมครับ', 'ロッ ノイ ダイ マイ クラップ', '買い物', 'ลด＝安くする・減らす＝lót̚＝ロッ；หน่อย＝少し＝nɔ̀j＝ノイ；ได้ไหม＝できますか＝dâj.mǎj＝ダイマイ；ครับ＝（男性の丁寧な語尾）＝kʰráp̚＝クラップ'],
+    ['英語を話せますか？', 'พูดภาษาอังกฤษได้ไหมครับ', 'プーッ パーサー アングリッ ダイ マイ クラップ', '挨拶', 'พูด＝話す＝pʰûːt̚＝プーッ；ภาษาอังกฤษ＝英語＝pʰaː.sǎː.ʔaŋ.krìt̚＝パーサーアングリッ；ได้ไหม＝できますか＝dâj.mǎj＝ダイマイ；ครับ＝（男性の丁寧な語尾）＝kʰráp̚＝クラップ'],
   ];
+
+  const noTone = (t) => String(t || '').normalize('NFD').replace(/[\u0300\u0301\u0302\u030C\u0303]/g, '').normalize('NFC');
+
+  // 単語分解の書式：「タイ語＝和訳＝発音記号＝カタカナ」（発音記号・カタカナは省略可）を ； か改行で区切る
+  function parseWords(text) {
+    const out = [];
+    String(text || '').split(/\r?\n|[;；]/).forEach((part) => {
+      const [th = '', ja = '', pron = '', kana = ''] = part.split(/[=＝]/).map((x) => x.trim());
+      if (th && ja) out.push({ th, ja, pron: noTone(pron), kana });
+    });
+    return out;
+  }
+  const wordsToText = (ws) => (ws || []).map((w) => `${w.th}＝${w.ja}${w.pron || w.kana ? '＝' + noTone(w.pron) : ''}${w.kana ? '＝' + w.kana : ''}`).join('\n');
+  let seedWordsCache = null;
+  function seedWords() {
+    if (!seedWordsCache) { seedWordsCache = {}; SEED.forEach((r) => { seedWordsCache[r[1]] = parseWords(r[4]); }); }
+    return seedWordsCache;
+  }
 
   const THAI_RE = /[\u0E00-\u0E7F]/;
   const $view = document.getElementById('view');
@@ -44,7 +63,7 @@
   }
 
   /* ---------------- state / storage ---------------- */
-  const defaultSettings = () => ({ rate: 0.7, repeat: 1, autoplay: false, voiceURI: '' });
+  const defaultSettings = () => ({ rate: 0.7, repeat: 1, autoplay: false, voiceURI: '', pronMode: 'ipa' });
 
   function normalize(s) {
     const out = {
@@ -61,12 +80,23 @@
         learned: !!p.learned,
         seen: Number(p.seen) || 0, hit: Number(p.hit) || 0, miss: Number(p.miss) || 0,
         last: String(p.last || ''), learnedAt: String(p.learnedAt || ''),
+        // 単語分解。未設定でタイ語が初期フレーズと同じなら、初期の分解を補う
+        words: cleanWords(p.words, p.th),
       });
     });
     return out;
   }
+  // 単語分解の読み込み。未設定、またはカタカナ無しの旧い初期分解なら、初期データの分解で補う
+  function cleanWords(arr, th) {
+    const seed = seedWords()[th] || [];
+    if (!Array.isArray(arr)) return seed;
+    const ws = arr.filter((w) => w && w.th && w.ja).map((w) => ({ th: String(w.th), ja: String(w.ja), pron: noTone(w.pron), kana: String(w.kana || '') }));
+    const sameAsSeed = seed.length && ws.length === seed.length && ws.every((w, i) => w.th === seed[i].th);
+    if (sameAsSeed && ws.every((w) => !w.pron)) return seed;
+    return ws;
+  }
   function seedState() {
-    return normalize({ phrases: SEED.map(([ja, th, kana, cat]) => ({ ja, th, kana, cat })) });
+    return normalize({ phrases: SEED.map(([ja, th, kana, cat, wd]) => ({ ja, th, kana, cat, words: parseWords(wd) })) });
   }
   function load() {
     try {
@@ -274,8 +304,7 @@
     }
     const p = byId(q[flash.i]);
     const face = flash.shown
-      ? `<div class="thai" lang="th">${esc(p.th)}</div>
-         ${p.kana ? `<div class="kana">${esc(p.kana)}</div>` : ''}
+      ? `${p.words && p.words.length ? wordsHTML(p) : `<div class="thai" lang="th">${esc(p.th)}</div>${p.kana ? `<div class="kana">${esc(p.kana)}</div>` : ''}`}
          <div class="hint">${esc(p.ja)}</div>
          ${spk(p.id)}`
       : `<div class="ja">${esc(p.ja)}</div><div class="hint">タップでタイ語を表示</div>`;
@@ -293,6 +322,13 @@
         <button class="btn" data-action="mark" data-v="no">まだ</button>
         <button class="btn ok" data-action="mark" data-v="yes">覚えた</button>
       </div>`;
+  }
+  function wordsHTML(p) {
+    if (!p.words || !p.words.length) return '';
+    const pm = state.settings.pronMode || 'ipa';
+    const pron = (w) => (pm === 'both' ? [noTone(w.pron), w.kana] : pm === 'kana' ? [w.kana || noTone(w.pron)] : [noTone(w.pron) || w.kana])
+      .filter(Boolean).map((t) => `<i>${esc(t)}</i>`).join('');
+    return `<div class="words">${p.words.map((w) => `<div class="w"><b lang="th">${esc(w.th)}</b>${pron(w)}<span>${esc(w.ja)}</span></div>`).join('')}</div>`;
   }
   function flashStep(d) {
     stop();
@@ -319,6 +355,7 @@
           <div class="ja">${esc(p.ja)}</div>
           <div class="thai" lang="th">${esc(p.th)}</div>
           ${p.kana ? `<div class="kana">${esc(p.kana)}</div>` : ''}
+          ${p.words && p.words.length ? `<div class="wline">${p.words.map((w) => `<span><span lang="th">${esc(w.th)}</span>＝${esc(w.ja)}</span>`).join('')}</div>` : ''}
         </div>
         ${spk(p.id, true)}
         <div class="tools">
@@ -353,6 +390,7 @@
       <label class="field">日本語訳<input id="f-ja" value="${esc(p?.ja)}" autocomplete="off"></label>
       <label class="field">タイ語表記（この文字だけが読み上げられます）<input id="f-th" lang="th" class="th" value="${esc(p?.th)}" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
       <label class="field">カタカナ発音（任意）<input id="f-kana" value="${esc(p?.kana)}" autocomplete="off"></label>
+      <label class="field">単語の分解（任意）<textarea id="f-words" placeholder="1行に1語：タイ語＝和訳＝発音記号＝カタカナ（後ろ2つは省略可）&#10;例）ขอ＝〜をください＝kʰɔː">${esc(wordsToText(p?.words))}</textarea></label>
       <label class="field">カテゴリー<input id="f-cat" list="cats" value="${esc(p?.cat || '挨拶')}" autocomplete="off"><datalist id="cats">${dl}</datalist></label>
       <div class="row">
         <button class="btn" data-action="nav" data-view="list">キャンセル</button>
@@ -364,13 +402,14 @@
     const th = document.getElementById('f-th').value.trim();
     const kana = document.getElementById('f-kana').value.trim();
     const cat = document.getElementById('f-cat').value.trim() || 'その他';
+    const words = parseWords(document.getElementById('f-words').value);
     if (!ja) return toast('日本語訳を入力してください');
     if (!th) return toast('タイ語表記を入力してください');
     if (!THAI_RE.test(th)) return toast('タイ語表記にタイ文字が含まれていません');
     if (editingId) {
-      Object.assign(byId(editingId), { ja, th, kana, cat });
+      Object.assign(byId(editingId), { ja, th, kana, cat, words });
     } else {
-      state.phrases.push({ id: uid(), ja, th, kana, cat, learned: false });
+      state.phrases.push({ id: uid(), ja, th, kana, cat, words, learned: false });
     }
     save();
     toast('保存しました');
@@ -385,8 +424,8 @@
   function vBulk() {
     return `
       <h1>まとめて追加</h1>
-      <p class="sub">1行に1フレーズ。<b>日本語｜タイ語｜カタカナ｜カテゴリー</b> の順に、縦線（｜ または |）かタブで区切ります。カタカナとカテゴリーは省略できます。</p>
-      <div class="note" lang="th" style="margin-bottom:12px"><span lang="ja">例：</span><br>メニューをください｜ขอเมนูครับ｜コー メーヌー クラップ｜レストラン<br>ありがとう｜ขอบคุณครับ</div>
+      <p class="sub">1行に1フレーズ。<b>日本語｜タイ語｜カタカナ｜カテゴリー｜単語分解</b> の順に、縦線（｜ または |）かタブで区切ります。カタカナ以降は省略できます。単語分解は「タイ語＝和訳＝発音記号＝カタカナ」を ； でつなぎます（発音記号とカタカナは省略可）。</p>
+      <div class="note" lang="th" style="margin-bottom:12px"><span lang="ja">例：</span><br>メニューをください｜ขอเมนูครับ｜コー メーヌー クラップ｜レストラン｜ขอ＝〜をください＝kʰɔː；เมนู＝メニュー＝meː.nuː；ครับ＝（丁寧な語尾）＝kʰrap̚<br>おいしい｜อร่อยครับ</div>
       <label class="field">フレーズ<textarea id="bulk-text" style="min-height:220px" placeholder="ここに貼り付け">${esc(bulkText)}</textarea></label>
       <label class="field">カテゴリー未指定の行に使う名前<input id="bulk-cat" value="その他" autocomplete="off"></label>
       <div class="row">
@@ -404,14 +443,14 @@
     const retry = []; // 書式の誤りで追加できなかった行だけ残す
     text.split(/\r?\n/).forEach((line, i) => {
       if (!line.trim()) return;
-      const [ja = '', th = '', kana = '', cat = ''] = line.split(/\t|\s*[|｜]\s*/).map((x) => x.trim());
+      const [ja = '', th = '', kana = '', cat = '', wd = ''] = line.split(/\t|\s*[|｜]\s*/).map((x) => x.trim());
       const n = i + 1;
       if (!ja || !th) { retry.push(line); return skipped.push(`${n}行目：日本語かタイ語が空です`); }
       if (!THAI_RE.test(th)) { retry.push(line); return skipped.push(`${n}行目：タイ語の欄にタイ文字がありません`); }
       const key = th.replace(/\s+/g, '');
       if (existing.has(key)) return skipped.push(`${n}行目：すでに登録済みです`);
       existing.add(key);
-      state.phrases.push({ id: uid(), ja, th, kana, cat: cat || defCat, learned: false });
+      state.phrases.push({ id: uid(), ja, th, kana, cat: cat || defCat, words: parseWords(wd), learned: false });
       added++;
     });
     if (added) save();
@@ -452,7 +491,7 @@
     L.push('');
     L.push('【依頼】上の状況をもとに、次に学ぶべきフレーズを10個提案してください。');
     L.push('- 苦手なフレーズは、覚え方のコツも添えてください。');
-    L.push('- 新しいフレーズは「日本語｜タイ語｜カタカナ｜カテゴリー」の形式で、1行1フレーズで出してください（アプリの「まとめて追加」に貼るため）。');
+    L.push('- 新しいフレーズは「日本語｜タイ語｜カタカナ｜カテゴリー｜単語分解」の形式で、1行1フレーズで出してください（アプリの「まとめて追加」に貼るため）。単語分解は「タイ語＝和訳＝発音記号」を ； でつないでください（例：ขอ＝〜をください＝kʰɔː；น้ำเปล่า＝水＝naːm.plaw；ครับ＝丁寧な語尾＝kʰrap̚）。発音記号はIPAで、声調記号は付けないでください。');
     L.push('- 男性が丁寧に話す「ครับ」で終わる形にしてください。');
     L.push('- 声調や自然さに自信がないものは、そう書いてください。');
     return L.join('\n');
@@ -476,6 +515,7 @@
       ${status}
       <div class="setting"><span>再生速度</span>${seg('rate', [0.5, 0.7, 1], s.rate, (v) => v + '倍')}</div>
       <div class="setting"><span>繰り返し</span>${seg('repeat', [1, 3], s.repeat, (v) => v + '回')}</div>
+      <div class="setting"><span>単語の発音表示</span>${seg('pronMode', ['ipa', 'kana', 'both'], s.pronMode, (v) => ({ ipa: '発音記号', kana: 'カタカナ', both: '両方' }[v]))}</div>
       <label class="check"><input type="checkbox" data-setting="autoplay" ${s.autoplay ? 'checked' : ''}>カードをめくったとき自動で再生</label>
       ${voiceSel}
       <div class="row" style="align-items:center">
@@ -571,7 +611,8 @@
     saveForm,
     bulkAdd,
     set: (el) => {
-      state.settings[el.dataset.k] = Number(el.dataset.v);
+      const v = el.dataset.v;
+      state.settings[el.dataset.k] = Number.isNaN(Number(v)) ? v : Number(v);
       save(); render();
     },
     export: () => {
