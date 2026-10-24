@@ -120,6 +120,7 @@
   let flash = { queue: [], i: 0, shown: false, mode: 'all' };
   let listUI = { q: '', cat: '' };
   let editingId = null;
+  let appVer = '';
 
   /* ---------------- TTS (Web Speech API) ---------------- */
   const synth = 'speechSynthesis' in window ? window.speechSynthesis : null;
@@ -547,7 +548,8 @@
         <label class="field" style="margin:0">貼り付けて復元<textarea id="import-text" placeholder="コピーしたJSONをここに貼り付け"></textarea></label>
         <button class="btn" data-action="importText">貼り付けた内容で復元</button>
         <button class="btn danger" data-action="reset">初期の15フレーズに戻す</button>
-      </div>`;
+      </div>
+      <p class="sub" style="margin-top:20px">アプリのバージョン：<span id="app-ver">${esc(appVer || '確認中…')}</span></p>`;
   }
 
   /* ---------------- backup ---------------- */
@@ -679,6 +681,22 @@
   /* ---------------- boot ---------------- */
   render();
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
-    navigator.serviceWorker.register('sw.js').catch(() => { /* オフライン対応が使えなくても本体は動く */ });
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloaded = false;
+    // 新しい版に切り替わったら、一度だけ読み込み直して新しい画面にする（学習記録は localStorage にあるので消えない）
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController || reloaded) return;
+      reloaded = true;
+      location.reload();
+    });
+    navigator.serviceWorker.register('sw.js').then((reg) => reg.update()).catch(() => { /* オフライン対応が使えなくても本体は動く */ });
+    // 設定画面に出すバージョン（= 端末に入っているキャッシュ名）
+    if (window.caches) {
+      caches.keys().then((ks) => {
+        appVer = ks.filter((k) => k.startsWith('thai-phrases-')).sort().pop() || '不明';
+        const el = document.getElementById('app-ver');
+        if (el) el.textContent = appVer;
+      }).catch(() => {});
+    }
   }
 })();
