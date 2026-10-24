@@ -7,6 +7,16 @@
    * ===================================================== */
 
   const KEY = 'thai-my-phrases.v1';
+  const CLOUD_KEY = 'thai-my-phrases.cloud'; // クラウド連携の設定（URL・合言葉）。学習記録とは別に保存し、書き出しには含めない
+  const CLOUD_URL_RE = /^https:\/\/script\.google\.com\/(?:a\/[^/]+\/)?macros\/s\/[\w-]+\/exec$/;
+  const loadCloud = () => {
+    const base = { url: '', key: '', user: '', enabled: false, dirty: false, last: '', error: '' };
+    try { return Object.assign(base, JSON.parse(localStorage.getItem(CLOUD_KEY) || '{}')); } catch (e) { return base; }
+  };
+  let cloud = loadCloud();
+  const saveCloud = () => { try { localStorage.setItem(CLOUD_KEY, JSON.stringify(cloud)); } catch (e) { /* 保存できなくても本体は動く */ } };
+  let cloudTimer = 0, cloudBusy = false;
+  let inviteText = '', inviteNew = false; // inviteNew：招待を受け取った直後（初回なら、話し手を選んだあとに設定画面へ進む）
   const DEFAULT_CATS = ['挨拶', 'レストラン', 'ホテル', '買い物', '移動'];
 
   // [日本語, タイ語, カタカナ, カテゴリー, 単語分解（タイ語＝和訳＝発音記号＝カタカナ；…）]
@@ -123,6 +133,7 @@
   function save() {
     try { localStorage.setItem(KEY, JSON.stringify(state)); }
     catch (e) { toast('保存に失敗しました。ブラウザの容量や設定を確認してください'); }
+    cloudQueue();
   }
   function today() {
     const d = localDate();
@@ -245,6 +256,7 @@
     if (view !== 'bulk') { bulkResult = ''; }
     reportText = '';
     aiPrompt = '';
+    inviteText = '';
     currentView = view;
     render();
     window.scrollTo(0, 0);
@@ -664,22 +676,140 @@
         <button class="btn" data-action="importText">貼り付けた内容で復元</button>
         <button class="btn danger" data-action="reset">初期の15フレーズに戻す</button>
       </div>
+
+      <h2 id="cloud-sec">クラウドにバックアップ（Googleスプレッドシート）</h2>
+      <p class="sub">学習記録を、自分のGoogleスプレッドシートに自動でバックアップします。先にスプレッドシート側の準備が必要です（READMEの「クラウドにバックアップする」）。始めるまで、何も送信しません。</p>
+      <label class="field">招待リンクを受け取った人は、ここに貼り付け<input id="invite-paste" placeholder="リンク、またはコードを貼り付け" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+      <button class="btn" data-action="inviteApply" style="margin-bottom:16px">招待を読み込む</button>
+      <label class="field">スクリプトのURL<input id="cloud-url" value="${esc(cloud.url)}" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+      <label class="field">合言葉<input id="cloud-key" value="${esc(cloud.key)}" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+      <label class="field">あなたの名前（記録を入れる場所の名前）<input id="cloud-user" value="${esc(cloud.user)}" placeholder="例：たろう" maxlength="20" autocomplete="off"></label>
+      <p class="sub" style="margin-top:-4px">1つのスプレッドシートを2人で使うときは、<b>別々の名前</b>にしてください。同じ名前だと、お互いの記録を上書きします。</p>
+      <div class="note" id="cloud-status">状態：${esc(cloudStatusText())}</div>
+      ${CLOUD_URL_RE.test(cloud.url) && cloud.key ? `
+      <div class="stack" style="margin-top:12px">
+        <button class="btn" data-action="copyInvite">招待リンクをコピー（相手に送る）</button>
+        ${inviteText ? `<label class="field" style="margin:0">コピーできなかったときは、全選択してコピーしてください<textarea id="invite-text" readonly style="min-height:90px">${esc(inviteText)}</textarea></label>` : ''}
+        <p class="sub" style="margin:0">リンクにはURLと合言葉が入っています。送る相手は、記録を預けてよい人だけにしてください。名前は、相手が自分で入れます。</p>
+      </div>` : ''}
+      <div class="stack" style="margin-top:12px">
+        ${cloud.enabled ? `
+        <button class="btn primary" data-action="cloudNow">今すぐ送る</button>
+        <button class="btn" data-action="cloudRestore">クラウドから復元</button>
+        <button class="btn" data-action="cloudStop">連携をやめる</button>` : `
+        <button class="btn primary" data-action="cloudStart" data-v="restore">クラウドから復元して始める（機種変更・新しい端末）</button>
+        <button class="btn" data-action="cloudStart" data-v="upload">この端末のデータを送って始める</button>`}
+      </div>
       <p class="sub" style="margin-top:20px">アプリのバージョン：<span id="app-ver">${esc(appVer || '確認中…')}</span></p>`;
   }
 
   /* ---------------- backup ---------------- */
   const exportJSON = () => JSON.stringify({ app: 'thai-my-phrases', version: 1, exportedAt: new Date().toISOString(), phrases: state.phrases, settings: state.settings }, null, 2);
-  function importJSON(text) {
+  function importJSON(text, label) {
     let data;
-    try { data = JSON.parse(text); } catch (e) { return toast('JSONとして読み込めませんでした'); }
-    if (!data || !Array.isArray(data.phrases)) return toast('このアプリのバックアップではありません');
+    try { data = JSON.parse(text); } catch (e) { toast('JSONとして読み込めませんでした'); return false; }
+    if (!data || !Array.isArray(data.phrases)) { toast('このアプリのバックアップではありません'); return false; }
     const next = normalize({ phrases: data.phrases, settings: data.settings, today: state.today });
-    if (!next.phrases.length) return toast('フレーズが1件も含まれていません');
-    if (!confirm(`現在のデータを、バックアップの ${next.phrases.length} 件で置き換えます。よろしいですか？`)) return;
+    if (!next.phrases.length) { toast('フレーズが1件も含まれていません'); return false; }
+    if (!confirm(`現在のデータを、${label || 'バックアップ'}の ${next.phrases.length} 件で置き換えます。よろしいですか？`)) return false;
     state = next;
     save();
     toast('復元しました');
     go('list');
+    return true;
+  }
+
+  /* ---------------- クラウド連携（Googleスプレッドシート） ----------------
+     設定画面でURLを入れた人だけ、学習記録を、そのスクリプト（script.google.com）へ送る。初期は何も送らない */
+  const fmtTime = (iso) => {
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? '' : d.toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  };
+  const cloudErr = (e) => {
+    const m = e && e.message ? e.message : '';
+    return m && !/Failed to fetch|Load failed|NetworkError/i.test(m) ? m : '通信できませんでした（URLと通信状況を確認してください）';
+  };
+  async function cloudCall(action, extra, keepalive) {
+    const res = await fetch(cloud.url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // プリフライトを避けるため text/plain で送る
+      body: JSON.stringify(Object.assign({ key: cloud.key, user: cloud.user, action }, extra)),
+      keepalive: !!keepalive,
+    });
+    let j;
+    try { j = JSON.parse(await res.text()); }
+    catch (e) { throw new Error('スクリプトの応答を読めませんでした（デプロイの「アクセスできるユーザー」が「全員」か確認してください）'); }
+    if (!j || !j.ok) throw new Error((j && j.error) || '失敗しました');
+    return j;
+  }
+  async function cloudUpload() {
+    const savedAt = new Date().toISOString();
+    await cloudCall('save', { savedAt, data: JSON.parse(exportJSON()) });
+    cloud.last = savedAt; cloud.error = ''; cloud.dirty = false;
+    saveCloud();
+  }
+  function cloudStatusText() {
+    if (!cloud.url) return '未設定（何も送信していません）';
+    if (!cloud.enabled) return '未連携（下のボタンで始めます。始めるまで何も送信しません）';
+    if (cloud.error) return `エラー：${cloud.error}`;
+    return `連携中${cloud.last ? `（最後に送信 ${fmtTime(cloud.last)}）` : ''}${cloud.dirty ? '・送信待ち' : ''}`;
+  }
+  function updateCloudStatus() {
+    const el = document.getElementById('cloud-status');
+    if (el) el.textContent = '状態：' + cloudStatusText();
+  }
+  // 記録を変えたら、少し待ってからまとめて送る（連携を始めた端末だけ）
+  function cloudQueue() {
+    if (!cloud.enabled || !CLOUD_URL_RE.test(cloud.url)) return;
+    cloud.dirty = true; saveCloud(); updateCloudStatus();
+    clearTimeout(cloudTimer);
+    cloudTimer = setTimeout(cloudFlush, 4000);
+  }
+  async function cloudFlush() {
+    if (!cloud.enabled || !cloud.dirty) return;
+    if (cloudBusy) { cloudQueue(); return; }
+    cloudBusy = true;
+    try { await cloudUpload(); }
+    catch (e) { cloud.error = cloudErr(e); saveCloud(); }
+    cloudBusy = false;
+    updateCloudStatus();
+  }
+  function cloudReady() {
+    if (!CLOUD_URL_RE.test(cloud.url)) { toast('URLは https://script.google.com/…/exec の形で入力してください'); return false; }
+    if (!cloud.key) { toast('合言葉を入力してください'); return false; }
+    if (!cloud.user || cloud.user.length > 20 || /[[\]*?:/\\]/.test(cloud.user)) { toast('名前は20文字以内で入力してください（[ ] * ? : / \\ は使えません）'); return false; }
+    return true;
+  }
+  /* --- 招待リンク：URLと合言葉を、リンク（# 以降。サーバーには送られない）に入れて渡す --- */
+  const b64uEncode = (str) => {
+    let bin = ''; new TextEncoder().encode(str).forEach((c) => { bin += String.fromCharCode(c); });
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  };
+  const b64uDecode = (code) => {
+    const b = atob(code.replace(/-/g, '+').replace(/_/g, '/'));
+    return new TextDecoder().decode(Uint8Array.from(b, (c) => c.charCodeAt(0)));
+  };
+  const inviteLink = () => `${location.href.split('#')[0]}#invite=${b64uEncode(JSON.stringify({ u: cloud.url, k: cloud.key }))}`;
+  // リンク全体でも、コードだけでも読める。正しくなければ null
+  function readInvite(text) {
+    const t = String(text || '').trim();
+    const m = t.match(/invite=([\w-]+)/);
+    try {
+      const o = JSON.parse(b64uDecode(m ? m[1] : t));
+      if (o && CLOUD_URL_RE.test(o.u) && typeof o.k === 'string' && o.k) return o;
+    } catch (e) { /* 読めないコードは無効 */ }
+    return null;
+  }
+  function applyInvite(o) {
+    if (cloud.url && (cloud.url !== o.u || cloud.key !== o.k) && !confirm('すでにクラウドの設定があります。招待の内容に置き換えますか？')) return false;
+    cloud.url = o.u; cloud.key = o.k; saveCloud();
+    return true;
+  }
+  const isStandalone = () => window.navigator.standalone === true || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches);
+  async function cloudRestore() {
+    const j = await cloudCall('load');
+    if (j.empty || !j.data) { toast('クラウドには、まだデータがありません'); return false; }
+    return importJSON(JSON.stringify(j.data), `クラウド（${fmtTime(j.updatedAt)} 保存）`);
   }
 
   /* ---------------- events ---------------- */
@@ -762,7 +892,7 @@
         toast('自動コピーに失敗しました。下の欄から手動でコピーしてください');
       }
     },
-    setup: (el) => { state = seedState(el.dataset.v); firstRun = false; save(); render(); },
+    setup: (el) => { state = seedState(el.dataset.v); firstRun = false; save(); if (inviteNew) { inviteNew = false; showInvitedSettings(); } else render(); },
     aiCount: (el) => { aiCount = Number(el.dataset.v); render(); },
     copyPrompt: async () => {
       const scene = aiScene.trim();
@@ -776,9 +906,61 @@
         toast('自動コピーに失敗しました。下の欄から手動でコピーしてください');
       }
     },
+    cloudStart: async (el) => {
+      if (!cloudReady() || cloudBusy) return;
+      cloudBusy = true;
+      try {
+        let ok = false;
+        if (el.dataset.v === 'restore') ok = await cloudRestore();
+        else {
+          const info = await cloudCall('ping');
+          if (info.count && !confirm(`「${cloud.user}」の名前で、クラウドにすでに ${info.count} 件のデータがあります（${fmtTime(info.updatedAt)} 保存）。この端末のデータで上書きしますか？\n※別の人の記録なら、キャンセルして名前を変えてください。前の日までのデータは、シート backup_prev_${cloud.user} に1世代だけ残ります。`)) return;
+          await cloudUpload();
+          ok = true;
+        }
+        if (ok) {
+          cloud.enabled = true; cloud.dirty = false; cloud.error = ''; clearTimeout(cloudTimer); saveCloud();
+          toast('クラウドへのバックアップを始めました');
+          render();
+        }
+      } catch (e) { toast(cloudErr(e)); }
+      finally { cloudBusy = false; }
+    },
+    cloudNow: async () => {
+      if (!cloudReady() || cloudBusy) return;
+      cloudBusy = true;
+      try { await cloudUpload(); toast('送信しました'); }
+      catch (e) { cloud.error = cloudErr(e); saveCloud(); toast(cloud.error); }
+      finally { cloudBusy = false; updateCloudStatus(); }
+    },
+    cloudRestore: async () => {
+      if (!cloudReady() || cloudBusy) return;
+      cloudBusy = true;
+      try { await cloudRestore(); } catch (e) { toast(cloudErr(e)); } finally { cloudBusy = false; }
+    },
+    copyInvite: async () => {
+      if (!CLOUD_URL_RE.test(cloud.url) || !cloud.key) return toast('先にURLと合言葉を入れてください');
+      const text = inviteLink();
+      try { await navigator.clipboard.writeText(text); inviteText = ''; toast('コピーしました。LINEなどで相手に送ってください'); }
+      catch (e) {
+        inviteText = text; render();
+        const ta = document.getElementById('invite-text');
+        if (ta) { ta.focus(); ta.select(); }
+        toast('自動コピーに失敗しました。下の欄から手動でコピーしてください');
+      }
+    },
+    inviteApply: () => {
+      const o = readInvite(document.getElementById('invite-paste').value);
+      if (!o) return toast('招待を読み取れませんでした。リンクをそのまま貼り付けてください');
+      if (applyInvite(o)) { toast('URLと合言葉を入れました。名前を入れて、始めてください'); render(); }
+    },
+    cloudStop: () => {
+      if (!confirm('クラウドへの送信をやめます。クラウド上のデータは、そのまま残ります。')) return;
+      cloud.enabled = false; cloud.dirty = false; clearTimeout(cloudTimer); saveCloud(); render();
+    },
     importText: () => importJSON(document.getElementById('import-text').value),
     reset: () => {
-      if (confirm('登録したフレーズと学習記録をすべて消して、初期の15フレーズに戻します。よろしいですか？')) {
+      if (confirm('登録したフレーズと学習記録をすべて消して、初期の15フレーズに戻します。よろしいですか？' + (cloud.enabled ? '\n※クラウドのバックアップも、この初期状態で上書きされます（前の日までの分は backup_prev_名前 のシートに残ります）。' : ''))) {
         stop(); state = seedState(state.settings.speaker); save(); toast('初期状態に戻しました'); render();
       }
     },
@@ -796,6 +978,9 @@
   document.addEventListener('input', (e) => {
     if (e.target.id === 'bulk-text') bulkText = e.target.value;
     else if (e.target.id === 'ai-scene') aiScene = e.target.value;
+    else if (e.target.id === 'cloud-url') { cloud.url = e.target.value.trim(); saveCloud(); }
+    else if (e.target.id === 'cloud-key') { cloud.key = e.target.value.trim(); saveCloud(); }
+    else if (e.target.id === 'cloud-user') { cloud.user = e.target.value.trim(); saveCloud(); }
     if (e.target.id === 'q') {
       listUI.q = e.target.value;
       document.getElementById('items').innerHTML = itemsHTML();
@@ -815,9 +1000,43 @@
     }
   });
   window.addEventListener('pagehide', stop);
+  // アプリを閉じる・切り替えるときに送り残しがあれば、すぐ送る。通信が戻ったときも送り直す
+  document.addEventListener('visibilitychange', () => {
+    if (!cloud.enabled || !cloud.dirty) return;
+    if (document.visibilityState === 'hidden') {
+      clearTimeout(cloudTimer);
+      try {
+        const body = JSON.stringify({ key: cloud.key, user: cloud.user, action: 'save', savedAt: new Date().toISOString(), data: JSON.parse(exportJSON()) });
+        if (body.length < 60000) fetch(cloud.url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body, keepalive: true }).catch(() => {});
+      } catch (e) { /* 次に開いたときに送り直す（dirty は残す） */ }
+    } else { cloudQueue(); }
+  });
+  window.addEventListener('online', () => { if (cloud.enabled && cloud.dirty) cloudQueue(); });
 
   /* ---------------- boot ---------------- */
+  // 設定画面を開いて、クラウドの欄まで進める
+  function showInvitedSettings() {
+    go('settings');
+    const el = document.getElementById('cloud-sec');
+    if (el) el.scrollIntoView();
+    const u = document.getElementById('cloud-user');
+    if (u) u.focus({ preventScroll: true });
+  }
   render();
+  // 招待リンク（#invite=…）から開かれたとき：URLと合言葉を入れる。連携は、名前を入れて「始める」を押すまで始まらない
+  if (location.hash.startsWith('#invite=')) {
+    const o = readInvite(location.hash);
+    if (!o) toast('招待を読み取れませんでした。リンクが途中で切れていないか確認してください');
+    else if (cloud.url === o.u && cloud.key === o.k) {
+      if (isStandalone()) history.replaceState(null, '', location.pathname + location.search); // 受け取り済み
+    } else if (applyInvite(o)) {
+      // Safari で開いたときは、リンクをそのまま残す（「ホーム画面に追加」したアプリが、このリンクで開く場合に備える）。アプリで開いたときは消す
+      if (isStandalone()) history.replaceState(null, '', location.pathname + location.search);
+      if (firstRun) inviteNew = true; else showInvitedSettings();
+      toast('招待を受け取りました。名前を入れて、始めてください');
+    }
+  }
+  if (cloud.enabled && cloud.dirty) cloudQueue(); // 前回送れなかった分を送る
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     const hadController = !!navigator.serviceWorker.controller;
     let reloaded = false;
