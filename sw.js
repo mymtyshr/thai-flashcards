@@ -1,4 +1,4 @@
-const CACHE = 'thai-phrases-v10';
+const CACHE = 'thai-phrases-v11';
 const ASSETS = ['./', './index.html', './style.css', './app.js', './manifest.webmanifest', './icon.svg', './icon-192.png', './icon-512.png', './apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {

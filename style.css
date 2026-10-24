@@ -131,7 +131,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
 
 .words { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
-.w { padding: 6px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+.w { padding: 6px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); color: var(--ink); font: inherit; text-align: center; cursor: pointer; min-height: 44px; }
+.w.playing { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
 .w b { display: block; font-size: 20px; font-weight: 600; line-height: 1.4; }
 .w i { display: block; font-style: normal; font-size: 14px; color: var(--ink); font-family: system-ui, "Helvetica Neue", Arial, sans-serif; line-height: 1.5; }
 .w span { display: block; font-size: 12px; color: var(--sub); }

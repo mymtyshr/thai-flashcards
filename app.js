@@ -154,6 +154,7 @@
       b.classList.toggle('playing', on);
       b.setAttribute('aria-label', on ? '停止' : 'タイ語を再生');
     });
+    document.querySelectorAll('[data-action="speakWord"]').forEach((b) => b.classList.toggle('playing', b.dataset.id === playingId));
   }
   function stop() {
     token++;
@@ -329,7 +330,7 @@
     const pm = state.settings.pronMode || 'ipa';
     const pron = (w) => (pm === 'both' ? [noTone(w.pron), w.kana] : pm === 'kana' ? [w.kana || noTone(w.pron)] : [noTone(w.pron) || w.kana])
       .filter(Boolean).map((t) => `<i>${esc(t)}</i>`).join('');
-    return `<div class="words">${p.words.map((w) => `<div class="w"><b lang="th">${esc(w.th)}</b>${pron(w)}<span>${esc(w.ja)}</span></div>`).join('')}</div>`;
+    return `<div class="words">${p.words.map((w, i) => `<button class="w" data-action="speakWord" data-id="${esc(p.id)}#${i}" aria-label="${esc(w.th)}を再生"><b lang="th">${esc(w.th)}</b>${pron(w)}<span>${esc(w.ja)}</span></button>`).join('')}</div>`;
   }
   function flashStep(d) {
     stop();
@@ -601,6 +602,13 @@
       if (id === 'test') return speak('สวัสดีครับ', 'test');
       const p = byId(id);
       if (p) speak(p.th, p.id);
+    },
+    // 単語の枠をタップ：その単語だけ読み上げる（読み上げは speak() を通す）
+    speakWord: (el) => {
+      const [pid, i] = el.dataset.id.split('#');
+      const p = byId(pid);
+      const w = p && p.words && p.words[Number(i)];
+      if (w) speak(w.th, el.dataset.id);
     },
     cat: (el) => { listUI.cat = el.dataset.cat; render(); },
     toggleLearned: (el) => { const p = byId(el.dataset.id); if (p) { p.learned = !p.learned; if (p.learned && !p.learnedAt) p.learnedAt = localDate(); save(); document.getElementById('items').innerHTML = itemsHTML(); updatePlayingUI(); } },
