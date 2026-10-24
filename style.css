@@ -190,3 +190,12 @@ label.field textarea { min-height: 96px; font-size: 14px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 
 details summary { min-height: 44px; display: flex; align-items: center; color: var(--sub); font-weight: 600; cursor: pointer; }
+
+.sug { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; margin-bottom: 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); cursor: pointer; }
+.sug.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.sug.dup { opacity: .5; cursor: default; }
+.sug-main { min-width: 0; }
+.sug-main b { display: block; font-size: 16px; }
+.sug-main .sug-th { display: block; font-size: 20px; font-weight: 600; margin-top: 2px; overflow-wrap: anywhere; }
+.sug-main .sug-kana { display: block; font-size: 14px; color: var(--ink); }
+.sug-main small { display: block; font-size: 12px; color: var(--sub); margin-top: 2px; }

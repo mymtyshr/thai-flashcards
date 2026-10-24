@@ -11,6 +11,11 @@
 // ★ ここを、自分だけの合言葉に書き換える（アプリの設定画面にも同じものを入れる）
 const SECRET = 'ここを自分だけの合言葉に変える';
 
+// 「AIに提案してもらう」で使うAI。APIキーは、スクリプトの「プロパティ」（ANTHROPIC_API_KEY）に入れる。このファイルには書かない
+const MODEL = 'claude-sonnet-5-5';
+const SUGGEST_MAX_PER_DAY = 30; // 1日に呼べる回数の上限（うっかり使いすぎ・他人に使われたときの歯止め）
+const SUGGEST_MAX_PROMPT = 20000; // 依頼文の長さの上限（文字数）
+
 const CHUNK = 40000; // 1つのセルに入れられる文字数（5万）の手前で区切る
 const SHEET_SUMMARY = 'サマリ';
 
@@ -24,6 +29,8 @@ function doPost(e) {
     if (SECRET.indexOf('ここを') === 0) return out_({ ok: false, error: 'スクリプトの SECRET（合言葉）を書き換えてください' });
     if (!req || req.key !== SECRET) return out_({ ok: false, error: '合言葉が違います' });
     const user = userOf_(req);
+    // AIへの問い合わせは時間がかかるので、保存用のロックは取らない（ほかの人の保存を待たせない）
+    if (req.action === 'suggest') return out_(suggest_(req));
     const lock = LockService.getScriptLock();
     lock.waitLock(20000);
     try {
@@ -131,4 +138,38 @@ function updateSummary_(user, savedAt, count, learned) {
   const names = last >= 2 ? sh.getRange(2, 1, last - 1, 1).getValues().map((r) => String(r[0])) : [];
   const idx = names.indexOf(user);
   sh.getRange(idx >= 0 ? idx + 2 : last + 1, 1, 1, 4).setValues([[user, count, learned, savedAt]]);
+}
+
+// アプリが作った依頼文をAIに送り、答えの文章をそのまま返す。取り込みの書式はアプリ側で読む
+function suggest_(req) {
+  const props = PropertiesService.getScriptProperties();
+  const apiKey = props.getProperty('ANTHROPIC_API_KEY');
+  if (!apiKey) return { ok: false, error: 'スクリプトのプロパティに ANTHROPIC_API_KEY が入っていません（READMEの手順）' };
+  const prompt = String(req.prompt || '');
+  if (!prompt) return { ok: false, error: '依頼文が空です' };
+  if (prompt.length > SUGGEST_MAX_PROMPT) return { ok: false, error: '依頼文が長すぎます' };
+
+  const tz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
+  const day = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+  let used = { day: day, n: 0 };
+  try { const saved = JSON.parse(props.getProperty('SUGGEST_COUNT') || ''); if (saved && saved.day === day) used = saved; } catch (e) { /* 初回 */ }
+  if (used.n >= SUGGEST_MAX_PER_DAY) return { ok: false, error: '今日の提案の回数（' + SUGGEST_MAX_PER_DAY + '回）に達しました。明日また使えます' };
+  used.n += 1;
+  props.setProperty('SUGGEST_COUNT', JSON.stringify(used));
+
+  const res = UrlFetchApp.fetch('https://api.anthropic.com/v1/messages', {
+    method: 'post',
+    contentType: 'application/json',
+    headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+    payload: JSON.stringify({ model: MODEL, max_tokens: 8000, messages: [{ role: 'user', content: prompt }] }),
+    muteHttpExceptions: true,
+  });
+  let body;
+  try { body = JSON.parse(res.getContentText()); } catch (e) { return { ok: false, error: 'AIの応答を読めませんでした（' + res.getResponseCode() + '）' }; }
+  if (res.getResponseCode() !== 200) {
+    return { ok: false, error: 'AIの呼び出しに失敗しました：' + ((body && body.error && body.error.message) || res.getResponseCode()) };
+  }
+  const text = (body.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
+  if (!text) return { ok: false, error: 'AIの答えが空でした' };
+  return { ok: true, text: text, remaining: SUGGEST_MAX_PER_DAY - used.n };
 }

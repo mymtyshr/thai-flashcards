@@ -465,6 +465,7 @@
   /* --- bulk add --- */
   let bulkText = '';
   let bulkResult = '';
+  let sugg = null; // AIの提案：{ busy } か { items: [{ja, th, kana, cat, wd, dup, on}], notes }
   let aiScene = '', aiCount = 10, aiPrompt = '';
   const segHTML = (action, name, vals, cur, fmt) => `<div class="seg" role="group">${vals.map((v) =>
     `<button data-action="${action}" data-k="${name}" data-v="${v}" aria-pressed="${String(cur) === String(v)}">${fmt(v)}</button>`).join('')}</div>`;
@@ -487,18 +488,19 @@
     const sp = speakerOf();
     // 参考として、登録済みのフレーズ（覚えた／まだ）を載せる。長くなりすぎないよう各50件まで
     const LIMIT = 50;
-    const refs = (title, list) => {
+    const refs = (title, list, fmt) => {
       if (!list.length) return [];
-      const shown = list.slice(0, LIMIT).map((p) => `- ${p.ja}｜${p.th}`);
+      const shown = list.slice(0, LIMIT).map((p) => (fmt ? fmt(p) : `- ${p.ja}｜${p.th}`));
       if (list.length > LIMIT) shown.push(`- ほか${list.length - LIMIT}件`);
       return ['', title, ...shown];
     };
+    const weak = state.phrases.filter((p) => !p.learned && (p.miss || 0) > 0).sort((a, b) => (b.miss || 0) - (a.miss || 0)).slice(0, 10);
     const known = state.phrases.filter((p) => p.learned).sort((a, b) => (b.learnedAt || '').localeCompare(a.learnedAt || ''));
     const rest = state.phrases.filter((p) => !p.learned);
     return [
       'タイ語の旅行フレーズ帳アプリに追加するフレーズを作ってください。',
       '',
-      `【場面】${scene}`,
+      `【場面】${scene || 'おまかせ（登録済みのフレーズと、苦手なものを踏まえて、旅行で次に役立つ表現を選んでください）'}`,
       `【件数】${n}個`,
       `【話し手】${sp.ask}`,
       `【既存のカテゴリー】${categories().join('、')}（できるだけこの中から選び、合わなければ新しく作ってよい）`,
@@ -518,24 +520,75 @@
       '- 下の「登録済み」のフレーズと、同じ内容のものは作らないでください。',
       '- 「覚えたフレーズ」は、今の難しさの目安です。同じくらい、または少しだけ難しい表現にしてください。',
       '- 声調・綴り・和訳に自信がないものは、コードブロックの外に、どのフレーズか書いてください。自信があるふりをしないでください。',
+      ...refs('【苦手なフレーズ（「まだ」を何度も押したもの。似た表現や、関連する表現を作る手がかりに）】', weak, (p) => `- ${p.ja}｜${p.th}（まだ${p.miss}回）`),
       ...refs('【登録済み：覚えたフレーズ（新しい順）】', known),
       ...refs('【登録済み：まだ覚えていないフレーズ】', rest),
     ].join('\n');
+  }
+  const THAI_KEY = (th) => th.replace(/\s+/g, '');
+  // AIの答え（コードブロックつきでもよい）を、提案の一覧にする。コードブロックの外の文章は、注意書きとして残す
+  function parseSuggestions(text) {
+    const m = text.match(/```[^\n]*\n([\s\S]*?)```/);
+    const body = m ? m[1] : text;
+    const notes = (m ? text.replace(m[0], '') : '').trim();
+    const have = new Set(state.phrases.map((p) => THAI_KEY(p.th)));
+    const seen = new Set();
+    const items = [];
+    body.split(/\r?\n/).forEach((raw) => {
+      const line = cleanBulkLine(raw);
+      if (!line) return;
+      const [ja = '', th = '', kana = '', cat = '', wd = ''] = line.split(/\t|\s*[|｜]\s*/).map((x) => x.trim());
+      if (!ja || !th || !THAI_RE.test(th) || (ja === '日本語' && /タイ語/.test(th))) return;
+      const key = THAI_KEY(th);
+      if (seen.has(key)) return;
+      seen.add(key);
+      const dup = have.has(key);
+      items.push({ ja, th, kana, cat: cat || 'その他', wd, dup, on: !dup });
+    });
+    return { items, notes };
+  }
+  function vSuggest() {
+    if (!sugg) return '';
+    if (sugg.busy) return '<div class="note" style="margin-top:12px">AIが考えています…（20〜40秒ほどかかります）</div>';
+    const n = sugg.items.filter((x) => x.on).length;
+    const list = sugg.items.map((x, i) => `
+      <div class="sug${x.on ? ' on' : ''}${x.dup ? ' dup' : ''}" data-action="toggleSug" data-i="${i}" role="checkbox" aria-checked="${x.on}" tabindex="0">
+        <div class="sug-main">
+          <b>${esc(x.ja)}</b>
+          <span class="sug-th" lang="th">${esc(x.th)}</span>
+          ${x.kana ? `<span class="sug-kana">${esc(x.kana)}</span>` : ''}
+          <small>${esc(x.cat)}${x.dup ? '・登録済み' : ''}${x.wd ? '・単語分解あり' : ''}</small>
+        </div>
+        <button class="spk sm" data-action="speakSug" data-i="${i}" aria-label="タイ語を再生">${ICON}</button>
+      </div>`).join('');
+    return `
+      <div style="margin-top:16px">
+        <h2>AIからの提案（${sugg.items.length}件）</h2>
+        <p class="sub">AIが作ったタイ語は、綴り・声調・和訳が間違っていることがあります。音声と意味を確認して、納得したものだけ追加してください。タップで、追加する・しないを切り替えます。</p>
+        ${sugg.notes ? `<div class="note" style="margin-bottom:12px">AIからの注意：<br>${esc(sugg.notes).replace(/\n/g, '<br>')}</div>` : ''}
+        ${list || '<div class="note">読み取れるフレーズがありませんでした。もう一度試してください。</div>'}
+        <div class="row" style="margin-top:12px">
+          <button class="btn" data-action="clearSug">やり直す</button>
+          <button class="btn primary" data-action="addSug" ${n ? '' : 'disabled'}>選んだ${n}件を追加</button>
+        </div>
+      </div>`;
   }
   function vBulk() {
     const s = state.settings;
     return `
       <h1>まとめて追加</h1>
       <h2>① AIに作ってもらう</h2>
-      <p class="sub">場面を入れて、AIに送る文章をコピーします。ChatGPTやClaudeなど、お使いのAIのチャットに貼り付けてください。</p>
-      <label class="field">どんな場面のフレーズ？<input id="ai-scene" value="${esc(aiScene)}" placeholder="例：美容院、歯医者、タクシー、友だちとの会話" autocomplete="off"></label>
+      <label class="field">どんな場面のフレーズ？（空なら、AIにおまかせ）<input id="ai-scene" value="${esc(aiScene)}" placeholder="例：美容院、歯医者、タクシー、友だちとの会話" autocomplete="off"></label>
       <div class="setting"><span>件数</span><div class="seg" role="group">${[10, 20, 30].map((v) =>
         `<button data-action="aiCount" data-v="${v}" aria-pressed="${aiCount === v}">${v}個</button>`).join('')}</div></div>
       <div class="setting"><span>話し手</span>${segHTML('set', 'speaker', ['male', 'female'], s.speaker || 'male', (v) => ({ male: '男性（ครับ）', female: '女性（ค่ะ）' }[v]))}</div>
       <div class="stack" style="margin-top:12px">
-        <button class="btn primary" data-action="copyPrompt">AIに送る文章をコピー</button>
+        <button class="btn primary" data-action="suggest" ${cloud.enabled && !(sugg && sugg.busy) ? '' : 'disabled'}>AIに提案してもらう（自動）</button>
+        ${cloud.enabled ? '' : '<p class="sub" style="margin:0">自動の提案は、設定画面の「クラウドにバックアップ」を始めると使えます。</p>'}
+        <button class="btn" data-action="copyPrompt">AIに送る文章をコピー（手動）</button>
         ${aiPrompt ? `<label class="field" style="margin:0">コピーできなかったときは、全選択してコピーしてください<textarea id="ai-prompt" readonly style="min-height:160px">${esc(aiPrompt)}</textarea></label>` : ''}
       </div>
+      ${vSuggest()}
 
       <h2>② AIの答えを貼り付ける</h2>
       <p class="sub">AIが出したコードブロックの中身を、そのまま貼り付けてください。番号や「-」、コードブロックの線が付いていても読み取ります。すでに登録済みのフレーズは追加されません。</p>
@@ -729,13 +782,17 @@
     const m = e && e.message ? e.message : '';
     return m && !/Failed to fetch|Load failed|NetworkError/i.test(m) ? m : '通信できませんでした（URLと通信状況を確認してください）';
   };
-  async function cloudCall(action, extra, keepalive) {
-    const res = await fetch(cloud.url, {
+  async function cloudCall(action, extra, keepalive, timeoutMs) {
+    const ctl = timeoutMs && typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = ctl ? setTimeout(() => ctl.abort(), timeoutMs) : 0;
+    let res;
+    try { res = await fetch(cloud.url, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // プリフライトを避けるため text/plain で送る
       body: JSON.stringify(Object.assign({ key: cloud.key, user: cloud.user, action }, extra)),
       keepalive: !!keepalive,
-    });
+      signal: ctl ? ctl.signal : undefined,
+    }); } catch (e) { throw ctl && ctl.signal.aborted ? new Error('時間がかかりすぎました。もう一度試してください') : e; } finally { clearTimeout(timer); }
     let j;
     try { j = JSON.parse(await res.text()); }
     catch (e) { throw new Error('スクリプトの応答を読めませんでした（デプロイの「アクセスできるユーザー」が「全員」か確認してください）'); }
@@ -894,9 +951,46 @@
     },
     setup: (el) => { state = seedState(el.dataset.v); firstRun = false; save(); if (inviteNew) { inviteNew = false; showInvitedSettings(); } else render(); },
     aiCount: (el) => { aiCount = Number(el.dataset.v); render(); },
+    // AIに提案してもらう：依頼文は手動のときと同じ。クラウド連携のスクリプト経由でAIに送り、答えを一覧にする
+    suggest: async () => {
+      if (!cloud.enabled || !cloudReady() || (sugg && sugg.busy)) return;
+      sugg = { busy: true }; render();
+      try {
+        const j = await cloudCall('suggest', { prompt: buildPhrasePrompt(aiScene.trim(), aiCount) }, false, 120000);
+        sugg = parseSuggestions(j.text);
+        if (!sugg.items.length) toast('読み取れるフレーズがありませんでした');
+        else if (typeof j.remaining === 'number' && j.remaining <= 5) toast(`今日の残りは${j.remaining}回です`);
+      } catch (e) { sugg = null; toast(cloudErr(e)); }
+      render();
+    },
+    toggleSug: (el) => {
+      const x = sugg && sugg.items && sugg.items[Number(el.dataset.i)];
+      if (!x || x.dup) return;
+      x.on = !x.on; render();
+    },
+    speakSug: (el) => {
+      const i = Number(el.dataset.i);
+      const x = sugg && sugg.items && sugg.items[i];
+      if (x) speak(x.th, 'sug' + i);
+    },
+    clearSug: () => { stop(); sugg = null; render(); },
+    addSug: () => {
+      if (!sugg || !sugg.items) return;
+      const have = new Set(state.phrases.map((p) => THAI_KEY(p.th)));
+      let added = 0;
+      sugg.items.filter((x) => x.on && !x.dup).forEach((x) => {
+        if (have.has(THAI_KEY(x.th))) return;
+        have.add(THAI_KEY(x.th));
+        state.phrases.push({ id: uid(), ja: x.ja, th: x.th, kana: x.kana, cat: x.cat, words: parseWords(x.wd), learned: false });
+        added++;
+      });
+      stop(); sugg = null;
+      if (added) save();
+      toast(added ? `${added}件を追加しました` : '追加するフレーズがありませんでした');
+      go('list');
+    },
     copyPrompt: async () => {
       const scene = aiScene.trim();
-      if (!scene) { toast('どんな場面か、先に入力してください'); const i = document.getElementById('ai-scene'); if (i) i.focus(); return; }
       const text = buildPhrasePrompt(scene, aiCount);
       try { await navigator.clipboard.writeText(text); aiPrompt = ''; toast('コピーしました。AIのチャットに貼り付けてください'); }
       catch (e) {
