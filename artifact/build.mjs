@@ -15,7 +15,16 @@ const css = read('style.css') + `
 /* Artifact用：画面の端（ノッチ・システムバー）を避ける */
 .wrap { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
 .tabbar { padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); }
+/* Artifact用：枠の高さに合わせる配置。下のタブは固定せず、内容の部分だけをスクロールさせる（枠の上下に操作バーが出ても、下が隠れない）。
+   上下の余白は、Artifactの外枠が、すでに安全領域ぶん取っているので、二重に取らない */
+html, body { height: 100%; }
+body { display: flex; flex-direction: column; overflow: hidden; }
+#view { flex: 1 1 auto; min-height: 0; width: 100%; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; padding-top: 16px; padding-bottom: 24px; }
+.tabbar { position: static; flex: none; }
+#toast { bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
+.card { min-height: max(160px, min(300px, calc(100vh - 380px))); } /* 低い画面では、カードを縮めて、ボタンをスクロールなしで届くようにする */
 `;
+
 
 const html = `<title>タイ語マイフレーズ</title>
 <meta name="claude:viewport-fit-sides" content="cover">

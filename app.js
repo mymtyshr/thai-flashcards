@@ -282,6 +282,7 @@
     currentView = view;
     render();
     window.scrollTo(0, 0);
+    $view.scrollTop = 0; // 内容だけをスクロールさせる配置（Artifact版）でも、先頭に戻す
   }
 
   function vSetup() {
@@ -345,6 +346,7 @@
     }
     render();
     window.scrollTo(0, 0);
+    $view.scrollTop = 0; // 内容だけをスクロールさせる配置（Artifact版）でも、先頭に戻す
   }
   function vFlash() {
     const q = flash.queue.filter((id) => byId(id));
