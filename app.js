@@ -7,14 +7,20 @@
    * ===================================================== */
 
   const KEY = 'thai-my-phrases.v1';
+  // Claude Artifact など、ふつうのブラウザ以外で動かすときの差し替え口（通常は null）。
+  // HOST.storage（getItem/setItem）、HOST.ask(prompt)（AIに質問）、HOST.download(name, text)（ファイル保存）、HOST.version
+  const HOST = window.thaiHost || null;
+  let store;
+  try { store = HOST && HOST.storage ? HOST.storage : window.localStorage; } catch (e) { store = null; }
+  if (!store) store = { getItem: () => null, setItem: () => {} };
   const CLOUD_KEY = 'thai-my-phrases.cloud'; // クラウド連携の設定（URL・合言葉）。学習記録とは別に保存し、書き出しには含めない
   const CLOUD_URL_RE = /^https:\/\/script\.google\.com\/(?:a\/[^/]+\/)?macros\/s\/[\w-]+\/exec$/;
   const loadCloud = () => {
     const base = { url: '', key: '', user: '', enabled: false, dirty: false, last: '', error: '' };
-    try { return Object.assign(base, JSON.parse(localStorage.getItem(CLOUD_KEY) || '{}')); } catch (e) { return base; }
+    try { return Object.assign(base, JSON.parse(store.getItem(CLOUD_KEY) || '{}')); } catch (e) { return base; }
   };
   let cloud = loadCloud();
-  const saveCloud = () => { try { localStorage.setItem(CLOUD_KEY, JSON.stringify(cloud)); } catch (e) { /* 保存できなくても本体は動く */ } };
+  const saveCloud = () => { try { store.setItem(CLOUD_KEY, JSON.stringify(cloud)); } catch (e) { /* 保存できなくても本体は動く */ } };
   let cloudTimer = 0, cloudBusy = false;
   let inviteText = '', inviteNew = false; // inviteNew：招待を受け取った直後（初回なら、話し手を選んだあとに設定画面へ進む）
   const DEFAULT_CATS = ['挨拶', 'レストラン', 'ホテル', '買い物', '移動'];
@@ -81,7 +87,7 @@
   }
 
   /* ---------------- state / storage ---------------- */
-  const defaultSettings = () => ({ rate: 0.7, repeat: 1, autoplay: false, voiceURI: '', pronMode: 'ipa', speaker: 'male' });
+  const defaultSettings = () => ({ rate: 0.7, repeat: 1, autoplay: false, voiceURI: '', pronMode: 'ipa', speaker: 'male', aiAdd: 'direct' });
 
   function normalize(s) {
     const out = {
@@ -100,6 +106,7 @@
         last: String(p.last || ''), learnedAt: String(p.learnedAt || ''),
         // 単語分解。未設定でタイ語が初期フレーズと同じなら、初期の分解を補う
         words: cleanWords(p.words, p.th),
+        ...(p.ai ? { ai: true } : {}), // AIが追加して、まだ確認していないフレーズの印
       });
     });
     return out;
@@ -123,7 +130,7 @@
   let firstRun = false; // 保存データがないとき（初回）は、最初に話し手を選んでもらう
   function load() {
     try {
-      const raw = localStorage.getItem(KEY);
+      const raw = store.getItem(KEY);
       if (raw) { const s = JSON.parse(raw); if (s && Array.isArray(s.phrases)) return normalize(s); }
     } catch (e) { /* 壊れたデータは初期値に戻す */ }
     firstRun = true;
@@ -131,7 +138,7 @@
   }
   let state = load();
   function save() {
-    try { localStorage.setItem(KEY, JSON.stringify(state)); }
+    try { store.setItem(KEY, JSON.stringify(state)); }
     catch (e) { toast('保存に失敗しました。ブラウザの容量や設定を確認してください'); }
     cloudQueue();
   }
@@ -143,7 +150,7 @@
 
   let currentView = 'home';
   let flash = { queue: [], i: 0, shown: false, mode: 'all' };
-  let listUI = { q: '', cat: '' };
+  let listUI = { q: '', cat: '', ai: false };
   let editingId = null;
   let appVer = '';
 
@@ -243,6 +250,21 @@
   const spk = (id, small) => `<button class="spk${small ? ' sm' : ''}" data-action="speak" data-id="${esc(id)}" aria-label="タイ語を再生">${ICON}</button>`;
   const banner = () => `<div id="voice-banner" class="banner" ${thVoices.length ? 'hidden' : ''}>この端末ではタイ語の音声が見つかりません。他の言語で読み上げることはしません。設定画面の「音声が出ないとき」を確認してください。</div>`;
 
+  // 確認。ふつうのブラウザは confirm()。Artifact では confirm() が常に「いいえ」になるので、ページ内の確認画面を出す
+  function askOk(message) {
+    if (!HOST) return Promise.resolve(window.confirm(message));
+    return new Promise((resolve) => {
+      const back = document.createElement('div');
+      back.className = 'modal-back';
+      back.innerHTML = '<div class="modal" role="alertdialog" aria-modal="true"><p></p><div class="row"><button class="btn" data-v="no">キャンセル</button><button class="btn primary" data-v="yes">OK</button></div></div>';
+      back.querySelector('p').textContent = message;
+      const done = (v) => { back.remove(); resolve(v); };
+      back.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) done(b.dataset.v === 'yes'); });
+      document.body.appendChild(back);
+      back.querySelector('[data-v="no"]').focus();
+    });
+  }
+
   /* ---------------- views ---------------- */
   const byId = (id) => state.phrases.find((p) => p.id === id);
   const categories = () => {
@@ -260,6 +282,7 @@
     currentView = view;
     render();
     window.scrollTo(0, 0);
+    $view.scrollTop = 0; // 内容だけをスクロールさせる配置（Artifact版）でも、先頭に戻す
   }
 
   function vSetup() {
@@ -300,6 +323,7 @@
         <div class="stat"><b>${learned}</b><span>覚えた</span></div>
         <div class="stat"><b>${rest}</b><span>まだ</span></div>
       </div>
+      ${total ? '' : '<div class="note" style="margin-bottom:12px">フレーズがありません。「まとめて追加」でAIに作ってもらうか、設定の「初期の15フレーズに戻す」で入れ直せます。</div>'}
       <div class="bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><i style="width:${pct}%"></i></div>
       <div class="stack">
         <button class="btn primary" data-action="startFlash" data-mode="all">フラッシュカードを始める</button>
@@ -322,6 +346,7 @@
     }
     render();
     window.scrollTo(0, 0);
+    $view.scrollTop = 0; // 内容だけをスクロールさせる配置（Artifact版）でも、先頭に戻す
   }
   function vFlash() {
     const q = flash.queue.filter((id) => byId(id));
@@ -355,11 +380,13 @@
     return `
       ${banner()}
       ${modeSeg}
-      <div class="progress"><b>${flash.i + 1} / ${q.length}</b><span class="sub">${esc(p.cat)}${p.learned ? '・覚えた' : ''}</span></div>
+      <div class="progress"><b>${flash.i + 1} / ${q.length}</b><span class="sub">${esc(p.cat)}${p.learned ? '・覚えた' : ''}${p.ai ? '・AI追加（未確認）' : ''}</span></div>
       <div class="card${p.learned ? ' known' : ''}" data-action="flip" role="button" tabindex="0" aria-label="カードをめくる">${face}</div>
       <div class="nav-row">
         <button class="btn" data-action="prev" ${flash.i === 0 ? 'disabled' : ''}>前へ</button>
-        <button class="btn" data-action="flip">${flash.shown ? '隠す' : '答え'}</button>
+        ${HOST
+          ? `<button class="btn danger" data-action="del" data-id="${esc(p.id)}">削除</button>` // Artifact版：答え／隠すボタンは出さず（カードをタップでめくる）、このフレーズの削除を置く
+          : `<button class="btn" data-action="flip">${flash.shown ? '隠す' : '答え'}</button>`}
         <button class="btn" data-action="next" ${flash.i >= q.length - 1 ? 'disabled' : ''}>次へ</button>
       </div>
       <div class="row">
@@ -386,6 +413,7 @@
     const q = listUI.q.trim().toLowerCase();
     return state.phrases.filter((p) => {
       if (listUI.cat && p.cat !== listUI.cat) return false;
+      if (listUI.ai && !p.ai) return false;
       if (!q) return true;
       return [p.ja, p.th, p.kana, p.cat].some((s) => s.toLowerCase().includes(q));
     });
@@ -404,6 +432,7 @@
         ${spk(p.id, true)}
         <div class="tools">
           <span class="tag">${esc(p.cat)}</span>
+          ${p.ai ? `<span class="tag ai">AI・未確認</span><button class="btn small" data-action="aiOk" data-id="${esc(p.id)}">確認した</button>` : ''}
           <button class="btn small" data-action="toggleLearned" data-id="${esc(p.id)}" aria-pressed="${p.learned}">${p.learned ? '覚えた ✓' : 'まだ'}</button>
           <button class="btn small" data-action="edit" data-id="${esc(p.id)}">編集</button>
           <button class="btn small danger" data-action="del" data-id="${esc(p.id)}">削除</button>
@@ -417,7 +446,7 @@
       <h1>フレーズ一覧</h1>
       ${banner()}
       <input id="q" class="search" type="search" placeholder="日本語・タイ語・カタカナで検索" value="${esc(listUI.q)}" autocomplete="off">
-      <div class="chips">${chips}</div>
+      <div class="chips">${chips}${state.phrases.some((p) => p.ai) ? `<button class="chip" data-action="aiFilter" aria-pressed="${listUI.ai}">AI・未確認（${state.phrases.filter((p) => p.ai).length}）</button>` : ''}</div>
       <div id="items">${itemsHTML()}</div>
       <div class="stack" style="margin-top:8px">
         <button class="btn primary" data-action="nav" data-view="bulk">まとめて追加（AIで作る）</button>
@@ -465,7 +494,9 @@
   /* --- bulk add --- */
   let bulkText = '';
   let bulkResult = '';
+  let sugg = null; // AIの提案：{ busy } か { items: [{ja, th, kana, cat, wd, dup, on}], notes }
   let aiScene = '', aiCount = 10, aiPrompt = '';
+  const aiN = () => Math.min(30, Math.max(1, Math.floor(Number(aiCount)) || 10));
   const segHTML = (action, name, vals, cur, fmt) => `<div class="seg" role="group">${vals.map((v) =>
     `<button data-action="${action}" data-k="${name}" data-v="${v}" aria-pressed="${String(cur) === String(v)}">${fmt(v)}</button>`).join('')}</div>`;
   // 話し手（男性 ครับ／女性 ค่ะ・คะ）に合わせた、AIへの指定と書式の例
@@ -487,18 +518,19 @@
     const sp = speakerOf();
     // 参考として、登録済みのフレーズ（覚えた／まだ）を載せる。長くなりすぎないよう各50件まで
     const LIMIT = 50;
-    const refs = (title, list) => {
+    const refs = (title, list, fmt) => {
       if (!list.length) return [];
-      const shown = list.slice(0, LIMIT).map((p) => `- ${p.ja}｜${p.th}`);
+      const shown = list.slice(0, LIMIT).map((p) => (fmt ? fmt(p) : `- ${p.ja}｜${p.th}`));
       if (list.length > LIMIT) shown.push(`- ほか${list.length - LIMIT}件`);
       return ['', title, ...shown];
     };
+    const weak = state.phrases.filter((p) => !p.learned && (p.miss || 0) > 0).sort((a, b) => (b.miss || 0) - (a.miss || 0)).slice(0, 10);
     const known = state.phrases.filter((p) => p.learned).sort((a, b) => (b.learnedAt || '').localeCompare(a.learnedAt || ''));
     const rest = state.phrases.filter((p) => !p.learned);
     return [
       'タイ語の旅行フレーズ帳アプリに追加するフレーズを作ってください。',
       '',
-      `【場面】${scene}`,
+      `【場面】${scene || 'おまかせ（登録済みのフレーズと、苦手なものを踏まえて、旅行で次に役立つ表現を選んでください）'}`,
       `【件数】${n}個`,
       `【話し手】${sp.ask}`,
       `【既存のカテゴリー】${categories().join('、')}（できるだけこの中から選び、合わなければ新しく作ってよい）`,
@@ -518,24 +550,94 @@
       '- 下の「登録済み」のフレーズと、同じ内容のものは作らないでください。',
       '- 「覚えたフレーズ」は、今の難しさの目安です。同じくらい、または少しだけ難しい表現にしてください。',
       '- 声調・綴り・和訳に自信がないものは、コードブロックの外に、どのフレーズか書いてください。自信があるふりをしないでください。',
+      ...refs('【苦手なフレーズ（「まだ」を何度も押したもの。似た表現や、関連する表現を作る手がかりに）】', weak, (p) => `- ${p.ja}｜${p.th}（まだ${p.miss}回）`),
       ...refs('【登録済み：覚えたフレーズ（新しい順）】', known),
       ...refs('【登録済み：まだ覚えていないフレーズ】', rest),
     ].join('\n');
+  }
+  const aiReady = () => !!(HOST && HOST.ask) || cloud.enabled; // AIを呼べる状態か（Artifactでは、そのまま呼べる）
+  const THAI_KEY = (th) => th.replace(/\s+/g, '');
+  // 提案のフレーズを登録する（登録済みは飛ばす）。ai が true なら「AI・未確認」の印をつける。追加した数を返す
+  function addPhrases(items, ai) {
+    const have = new Set(state.phrases.map((p) => THAI_KEY(p.th)));
+    let added = 0;
+    items.forEach((x) => {
+      if (have.has(THAI_KEY(x.th))) return;
+      have.add(THAI_KEY(x.th));
+      state.phrases.push({ id: uid(), ja: x.ja, th: x.th, kana: x.kana, cat: x.cat, words: parseWords(x.wd), learned: false, ...(ai ? { ai: true } : {}) });
+      added++;
+    });
+    if (added) save();
+    return added;
+  }
+  // AIの答え（コードブロックつきでもよい）を、提案の一覧にする。コードブロックの外の文章は、注意書きとして残す
+  function parseSuggestions(text) {
+    const m = text.match(/```[^\n]*\n([\s\S]*?)```/);
+    const body = m ? m[1] : text;
+    const notes = (m ? text.replace(m[0], '') : '').trim();
+    const have = new Set(state.phrases.map((p) => THAI_KEY(p.th)));
+    const seen = new Set();
+    const items = [];
+    body.split(/\r?\n/).forEach((raw) => {
+      const line = cleanBulkLine(raw);
+      if (!line) return;
+      const [ja = '', th = '', kana = '', cat = '', wd = ''] = line.split(/\t|\s*[|｜]\s*/).map((x) => x.trim());
+      if (!ja || !th || !THAI_RE.test(th) || (ja === '日本語' && /タイ語/.test(th))) return;
+      const key = THAI_KEY(th);
+      if (seen.has(key)) return;
+      seen.add(key);
+      const dup = have.has(key);
+      items.push({ ja, th, kana, cat: cat || 'その他', wd, dup, on: !dup });
+    });
+    return { items, notes };
+  }
+  function vSuggest() {
+    if (!sugg) return '';
+    if (sugg.busy) return '<div class="note" style="margin-top:12px">AIが考えています…（20〜40秒ほどかかります）</div>';
+    const n = sugg.items.filter((x) => x.on).length;
+    const list = sugg.items.map((x, i) => `
+      <div class="sug${x.on ? ' on' : ''}${x.dup ? ' dup' : ''}" data-action="toggleSug" data-i="${i}" role="checkbox" aria-checked="${x.on}" tabindex="0">
+        <div class="sug-main">
+          <b>${esc(x.ja)}</b>
+          <span class="sug-th" lang="th">${esc(x.th)}</span>
+          ${x.kana ? `<span class="sug-kana">${esc(x.kana)}</span>` : ''}
+          <small>${esc(x.cat)}${x.dup ? '・登録済み' : ''}${x.wd ? '・単語分解あり' : ''}</small>
+        </div>
+        <button class="spk sm" data-action="speakSug" data-i="${i}" aria-label="タイ語を再生">${ICON}</button>
+      </div>`).join('');
+    return `
+      <div style="margin-top:16px">
+        <h2>AIからの提案（${sugg.items.length}件）</h2>
+        <p class="sub">AIが作ったタイ語は、綴り・声調・和訳が間違っていることがあります。音声と意味を確認して、納得したものだけ追加してください。タップで、追加する・しないを切り替えます。</p>
+        ${sugg.notes ? `<div class="note" style="margin-bottom:12px">AIからの注意：<br>${esc(sugg.notes).replace(/\n/g, '<br>')}</div>` : ''}
+        ${list || '<div class="note">読み取れるフレーズがありませんでした。もう一度試してください。</div>'}
+        <div class="row" style="margin-top:12px">
+          <button class="btn" data-action="clearSug">やり直す</button>
+          <button class="btn primary" data-action="addSug" ${n ? '' : 'disabled'}>選んだ${n}件を追加</button>
+        </div>
+      </div>`;
   }
   function vBulk() {
     const s = state.settings;
     return `
       <h1>まとめて追加</h1>
       <h2>① AIに作ってもらう</h2>
-      <p class="sub">場面を入れて、AIに送る文章をコピーします。ChatGPTやClaudeなど、お使いのAIのチャットに貼り付けてください。</p>
-      <label class="field">どんな場面のフレーズ？<input id="ai-scene" value="${esc(aiScene)}" placeholder="例：美容院、歯医者、タクシー、友だちとの会話" autocomplete="off"></label>
-      <div class="setting"><span>件数</span><div class="seg" role="group">${[10, 20, 30].map((v) =>
-        `<button data-action="aiCount" data-v="${v}" aria-pressed="${aiCount === v}">${v}個</button>`).join('')}</div></div>
+      <label class="field">どんな場面のフレーズ？（空なら、AIにおまかせ）<input id="ai-scene" value="${esc(aiScene)}" placeholder="例：美容院、歯医者、タクシー、友だちとの会話" autocomplete="off"></label>
+      <label class="field">何個ほしい？（1〜30）<input id="ai-count" type="number" inputmode="numeric" min="1" max="30" value="${esc(String(aiCount))}"></label>
+      <div class="chips" style="margin-top:-4px">${[5, 10, 20, 30].map((v) =>
+        `<button class="chip" data-action="aiCount" data-v="${v}" aria-pressed="${aiN() === v}">${v}個</button>`).join('')}</div>
+      <div class="setting"><span>追加のしかた</span>${segHTML('set', 'aiAdd', ['direct', 'review'], s.aiAdd || 'direct', (v) => ({ direct: 'すぐ追加', review: '確認してから' }[v]))}</div>
+      <p class="sub" style="margin-top:-4px">${(s.aiAdd || 'direct') === 'direct'
+        ? '追加したフレーズには「AI・未確認」の印が付きます。一覧で聞いて確認し、「確認した」を押すと印が消えます。'
+        : '提案の一覧で、聞いて確認して、選んだものだけ追加します。'}</p>
       <div class="setting"><span>話し手</span>${segHTML('set', 'speaker', ['male', 'female'], s.speaker || 'male', (v) => ({ male: '男性（ครับ）', female: '女性（ค่ะ）' }[v]))}</div>
       <div class="stack" style="margin-top:12px">
-        <button class="btn primary" data-action="copyPrompt">AIに送る文章をコピー</button>
+        <button class="btn primary" data-action="suggest" ${aiReady() && !(sugg && sugg.busy) ? '' : 'disabled'}>${(s.aiAdd || 'direct') === 'direct' ? 'AIに追加してもらう（自動）' : 'AIに提案してもらう（自動）'}</button>
+        ${aiReady() ? '' : '<p class="sub" style="margin:0">自動の追加は、設定画面の「クラウドにバックアップ」を始めると使えます。</p>'}
+        <button class="btn" data-action="copyPrompt">AIに送る文章をコピー（手動）</button>
         ${aiPrompt ? `<label class="field" style="margin:0">コピーできなかったときは、全選択してコピーしてください<textarea id="ai-prompt" readonly style="min-height:160px">${esc(aiPrompt)}</textarea></label>` : ''}
       </div>
+      ${vSuggest()}
 
       <h2>② AIの答えを貼り付ける</h2>
       <p class="sub">AIが出したコードブロックの中身を、そのまま貼り付けてください。番号や「-」、コードブロックの線が付いていても読み取ります。すでに登録済みのフレーズは追加されません。</p>
@@ -667,7 +769,7 @@
       </div>
 
       <h2>バックアップ</h2>
-      <p class="sub">ブラウザのデータを消すと学習記録も消えます。ときどき書き出してください。</p>
+      <p class="sub">${HOST ? '学習記録は、あなたのClaudeアカウントに紐づいて保存されます（他の人からは見えません）。念のため、ときどき書き出してください。' : 'ブラウザのデータを消すと学習記録も消えます。ときどき書き出してください。'}</p>
       <div class="stack">
         <button class="btn" data-action="export">JSONファイルとして書き出す</button>
         <button class="btn" data-action="copyExport">JSONをクリップボードにコピー</button>
@@ -675,8 +777,10 @@
         <label class="field" style="margin:0">貼り付けて復元<textarea id="import-text" placeholder="コピーしたJSONをここに貼り付け"></textarea></label>
         <button class="btn" data-action="importText">貼り付けた内容で復元</button>
         <button class="btn danger" data-action="reset">初期の15フレーズに戻す</button>
+        <button class="btn danger" data-action="deleteAll">フレーズをすべて削除</button>
       </div>
 
+      ${HOST ? '' : `
       <h2 id="cloud-sec">クラウドにバックアップ（Googleスプレッドシート）</h2>
       <p class="sub">学習記録を、自分のGoogleスプレッドシートに自動でバックアップします。先にスプレッドシート側の準備が必要です（READMEの「クラウドにバックアップする」）。始めるまで、何も送信しません。</p>
       <label class="field">招待リンクを受け取った人は、ここに貼り付け<input id="invite-paste" placeholder="リンク、またはコードを貼り付け" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
@@ -700,18 +804,19 @@
         <button class="btn primary" data-action="cloudStart" data-v="restore">クラウドから復元して始める（機種変更・新しい端末）</button>
         <button class="btn" data-action="cloudStart" data-v="upload">この端末のデータを送って始める</button>`}
       </div>
+      `}
       <p class="sub" style="margin-top:20px">アプリのバージョン：<span id="app-ver">${esc(appVer || '確認中…')}</span></p>`;
   }
 
   /* ---------------- backup ---------------- */
   const exportJSON = () => JSON.stringify({ app: 'thai-my-phrases', version: 1, exportedAt: new Date().toISOString(), phrases: state.phrases, settings: state.settings }, null, 2);
-  function importJSON(text, label) {
+  async function importJSON(text, label) {
     let data;
     try { data = JSON.parse(text); } catch (e) { toast('JSONとして読み込めませんでした'); return false; }
     if (!data || !Array.isArray(data.phrases)) { toast('このアプリのバックアップではありません'); return false; }
     const next = normalize({ phrases: data.phrases, settings: data.settings, today: state.today });
     if (!next.phrases.length) { toast('フレーズが1件も含まれていません'); return false; }
-    if (!confirm(`現在のデータを、${label || 'バックアップ'}の ${next.phrases.length} 件で置き換えます。よろしいですか？`)) return false;
+    if (!(await askOk(`現在のデータを、${label || 'バックアップ'}の ${next.phrases.length} 件で置き換えます。よろしいですか？`))) return false;
     state = next;
     save();
     toast('復元しました');
@@ -729,13 +834,17 @@
     const m = e && e.message ? e.message : '';
     return m && !/Failed to fetch|Load failed|NetworkError/i.test(m) ? m : '通信できませんでした（URLと通信状況を確認してください）';
   };
-  async function cloudCall(action, extra, keepalive) {
-    const res = await fetch(cloud.url, {
+  async function cloudCall(action, extra, keepalive, timeoutMs) {
+    const ctl = timeoutMs && typeof AbortController === 'function' ? new AbortController() : null;
+    const timer = ctl ? setTimeout(() => ctl.abort(), timeoutMs) : 0;
+    let res;
+    try { res = await fetch(cloud.url, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // プリフライトを避けるため text/plain で送る
       body: JSON.stringify(Object.assign({ key: cloud.key, user: cloud.user, action }, extra)),
       keepalive: !!keepalive,
-    });
+      signal: ctl ? ctl.signal : undefined,
+    }); } catch (e) { throw ctl && ctl.signal.aborted ? new Error('時間がかかりすぎました。もう一度試してください') : e; } finally { clearTimeout(timer); }
     let j;
     try { j = JSON.parse(await res.text()); }
     catch (e) { throw new Error('スクリプトの応答を読めませんでした（デプロイの「アクセスできるユーザー」が「全員」か確認してください）'); }
@@ -760,7 +869,7 @@
   }
   // 記録を変えたら、少し待ってからまとめて送る（連携を始めた端末だけ）
   function cloudQueue() {
-    if (!cloud.enabled || !CLOUD_URL_RE.test(cloud.url)) return;
+    if (!cloud.enabled || !CLOUD_URL_RE.test(cloud.url) || !state.phrases.length) return; // フレーズが空のときは送らない（クラウドの控えを残す）
     cloud.dirty = true; saveCloud(); updateCloudStatus();
     clearTimeout(cloudTimer);
     cloudTimer = setTimeout(cloudFlush, 4000);
@@ -858,9 +967,13 @@
     toggleLearned: (el) => { const p = byId(el.dataset.id); if (p) { p.learned = !p.learned; if (p.learned && !p.learnedAt) p.learnedAt = localDate(); save(); document.getElementById('items').innerHTML = itemsHTML(); updatePlayingUI(); } },
     add: () => { editingId = null; go('form'); },
     edit: (el) => { editingId = el.dataset.id; go('form'); },
-    del: (el) => {
+    del: async (el) => {
       const p = byId(el.dataset.id);
-      if (p && confirm(`「${p.ja}」を削除しますか？`)) { stop(); state.phrases = state.phrases.filter((x) => x.id !== p.id); save(); render(); }
+      if (p && await askOk(`「${p.ja}」を削除しますか？`)) {
+        stop(); state.phrases = state.phrases.filter((x) => x.id !== p.id);
+        if (currentView === 'flash') flash.shown = false; // カードの途中で消したら、次のカードは問題の面から
+        save(); render();
+      }
     },
     saveForm,
     bulkAdd,
@@ -869,7 +982,12 @@
       state.settings[el.dataset.k] = Number.isNaN(Number(v)) ? v : Number(v);
       save(); render();
     },
-    export: () => {
+    export: async () => {
+      if (HOST && HOST.download) {
+        try { await HOST.download(`thai-phrases-${localDate()}.json`, exportJSON()); toast('書き出しました'); }
+        catch (e) { toast(e && e.code === 'declined' ? '書き出しをやめました' : '書き出せませんでした。「JSONをクリップボードにコピー」を使ってください'); }
+        return;
+      }
       const blob = new Blob([exportJSON()], { type: 'application/json' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
@@ -894,10 +1012,57 @@
     },
     setup: (el) => { state = seedState(el.dataset.v); firstRun = false; save(); if (inviteNew) { inviteNew = false; showInvitedSettings(); } else render(); },
     aiCount: (el) => { aiCount = Number(el.dataset.v); render(); },
+    aiFilter: () => { listUI.ai = !listUI.ai; render(); },
+    aiOk: (el) => {
+      const p = byId(el.dataset.id);
+      if (!p) return;
+      delete p.ai; save();
+      if (listUI.ai && !state.phrases.some((x) => x.ai)) listUI.ai = false;
+      render();
+    },
+    // AIに提案してもらう：依頼文は手動のときと同じ。クラウド連携のスクリプト経由でAIに送り、答えを一覧にする
+    suggest: async () => {
+      if (!aiReady() || (sugg && sugg.busy)) return;
+      if (!(HOST && HOST.ask) && !cloudReady()) return;
+      sugg = { busy: true }; render();
+      try {
+        const prompt = buildPhrasePrompt(aiScene.trim(), aiN());
+        const j = HOST && HOST.ask ? { text: await HOST.ask(prompt) } : await cloudCall('suggest', { prompt }, false, 120000);
+        sugg = parseSuggestions(j.text);
+        if (!sugg.items.length) toast('読み取れるフレーズがありませんでした');
+        else if ((state.settings.aiAdd || 'direct') === 'direct') {
+          // すぐ追加：登録済みを除いて、頼んだ数まで。「AI・未確認」の印をつけ、一覧の未確認だけを表示する
+          const n = addPhrases(sugg.items.filter((x) => !x.dup).slice(0, aiN()), true);
+          sugg = null;
+          listUI.q = ''; listUI.cat = ''; listUI.ai = n > 0;
+          toast(n ? `${n}個追加しました（AI・未確認の印つき）${n < aiN() ? `。頼んだ${aiN()}個に足りない分は、登録済み・書式の崩れで除きました` : ''}` : '追加できるフレーズがありませんでした');
+          go('list');
+          return;
+        } else if (typeof j.remaining === 'number' && j.remaining <= 5) toast(`今日の残りは${j.remaining}回です`);
+      } catch (e) { sugg = null; toast(cloudErr(e)); }
+      render();
+    },
+    toggleSug: (el) => {
+      const x = sugg && sugg.items && sugg.items[Number(el.dataset.i)];
+      if (!x || x.dup) return;
+      x.on = !x.on; render();
+    },
+    speakSug: (el) => {
+      const i = Number(el.dataset.i);
+      const x = sugg && sugg.items && sugg.items[i];
+      if (x) speak(x.th, 'sug' + i);
+    },
+    clearSug: () => { stop(); sugg = null; render(); },
+    addSug: () => {
+      if (!sugg || !sugg.items) return;
+      const added = addPhrases(sugg.items.filter((x) => x.on && !x.dup), false);
+      stop(); sugg = null;
+      toast(added ? `${added}件を追加しました` : '追加するフレーズがありませんでした');
+      go('list');
+    },
     copyPrompt: async () => {
       const scene = aiScene.trim();
-      if (!scene) { toast('どんな場面か、先に入力してください'); const i = document.getElementById('ai-scene'); if (i) i.focus(); return; }
-      const text = buildPhrasePrompt(scene, aiCount);
+      const text = buildPhrasePrompt(scene, aiN());
       try { await navigator.clipboard.writeText(text); aiPrompt = ''; toast('コピーしました。AIのチャットに貼り付けてください'); }
       catch (e) {
         aiPrompt = text; render();
@@ -959,8 +1124,22 @@
       cloud.enabled = false; cloud.dirty = false; clearTimeout(cloudTimer); saveCloud(); render();
     },
     importText: () => importJSON(document.getElementById('import-text').value),
-    reset: () => {
-      if (confirm('登録したフレーズと学習記録をすべて消して、初期の15フレーズに戻します。よろしいですか？' + (cloud.enabled ? '\n※クラウドのバックアップも、この初期状態で上書きされます（前の日までの分は backup_prev_名前 のシートに残ります）。' : ''))) {
+    // すべてのフレーズ（と、その学習記録）を消す。設定（話し手・再生速度など）は残す。取り消せないので、2回確認する
+    deleteAll: async () => {
+      const n = state.phrases.length;
+      if (!n) return toast('削除するフレーズがありません');
+      if (!(await askOk(`登録されている ${n} 件のフレーズと、学習記録をすべて削除します。元に戻せません。\n先に「JSONとして書き出す」でバックアップしておくと安心です。\n\n削除しますか？`))) return;
+      if (!(await askOk(`本当に、${n} 件すべてを削除しますか？`))) return;
+      stop(); sugg = null;
+      state.phrases = [];
+      flash = { queue: [], i: 0, shown: false, mode: 'all' };
+      listUI = { q: '', cat: '', ai: false };
+      save();
+      toast(`${n}件を削除しました`);
+      go('home');
+    },
+    reset: async () => {
+      if (await askOk('登録したフレーズと学習記録をすべて消して、初期の15フレーズに戻します。よろしいですか？' + (cloud.enabled ? '\n※クラウドのバックアップも、この初期状態で上書きされます（前の日までの分は backup_prev_名前 のシートに残ります）。' : ''))) {
         stop(); state = seedState(state.settings.speaker); save(); toast('初期状態に戻しました'); render();
       }
     },
@@ -978,6 +1157,7 @@
   document.addEventListener('input', (e) => {
     if (e.target.id === 'bulk-text') bulkText = e.target.value;
     else if (e.target.id === 'ai-scene') aiScene = e.target.value;
+    else if (e.target.id === 'ai-count') aiCount = e.target.value;
     else if (e.target.id === 'cloud-url') { cloud.url = e.target.value.trim(); saveCloud(); }
     else if (e.target.id === 'cloud-key') { cloud.key = e.target.value.trim(); saveCloud(); }
     else if (e.target.id === 'cloud-user') { cloud.user = e.target.value.trim(); saveCloud(); }
@@ -1000,6 +1180,7 @@
     }
   });
   window.addEventListener('pagehide', stop);
+  window.addEventListener('thai-save-error', (e) => toast((e.detail && e.detail.message) || '保存に失敗しました'));
   // アプリを閉じる・切り替えるときに送り残しがあれば、すぐ送る。通信が戻ったときも送り直す
   document.addEventListener('visibilitychange', () => {
     if (!cloud.enabled || !cloud.dirty) return;
@@ -1037,7 +1218,8 @@
     }
   }
   if (cloud.enabled && cloud.dirty) cloudQueue(); // 前回送れなかった分を送る
-  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  if (HOST) { appVer = HOST.version || ''; }
+  else if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
     const hadController = !!navigator.serviceWorker.controller;
     let reloaded = false;
     // 新しい版に切り替わったら、一度だけ読み込み直して新しい画面にする（学習記録は localStorage にあるので消えない）

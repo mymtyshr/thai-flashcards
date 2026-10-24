@@ -11,10 +11,10 @@
   --warn: #9A3412;
   --warn-bg: #FFF1E6;
   --danger: #B42318;
-  color-scheme: light dark;
+  color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --bg: #0D1017;
     --surface: #171B25;
     --ink: #EEF1F7;
@@ -27,8 +27,25 @@
     --warn: #FDBA74;
     --warn-bg: #2B1D10;
     --danger: #FF8A80;
+    color-scheme: dark;
   }
 }
+:root[data-theme="dark"] {
+  --bg: #0D1017;
+  --surface: #171B25;
+  --ink: #EEF1F7;
+  --sub: #9AA4B8;
+  --line: #2A3040;
+  --accent: #93A4FF;
+  --accent-ink: #0D1017;
+  --ok: #5FD39A;
+  --ok-bg: #12281F;
+  --warn: #FDBA74;
+  --warn-bg: #2B1D10;
+  --danger: #FF8A80;
+  color-scheme: dark;
+}
+
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html { -webkit-text-size-adjust: 100%; }
@@ -190,3 +207,19 @@ label.field textarea { min-height: 96px; font-size: 14px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 
 details summary { min-height: 44px; display: flex; align-items: center; color: var(--sub); font-weight: 600; cursor: pointer; }
+
+.sug { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px; margin-bottom: 8px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); cursor: pointer; }
+.sug.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.sug.dup { opacity: .5; cursor: default; }
+.sug-main { min-width: 0; }
+.sug-main b { display: block; font-size: 16px; }
+.sug-main .sug-th { display: block; font-size: 20px; font-weight: 600; margin-top: 2px; overflow-wrap: anywhere; }
+.sug-main .sug-kana { display: block; font-size: 14px; color: var(--ink); }
+.sug-main small { display: block; font-size: 12px; color: var(--sub); margin-top: 2px; }
+
+.tag.ai { background: var(--warn-bg); color: var(--warn); }
+
+/* ---------- 確認画面（confirm() が使えない環境用） ---------- */
+.modal-back { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(0, 0, 0, .45); }
+.modal { width: 100%; max-width: 420px; padding: 20px; border-radius: 16px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); }
+.modal p { margin: 0 0 16px; line-height: 1.6; white-space: pre-line; }
