@@ -10,7 +10,7 @@
   const CLOUD_KEY = 'thai-my-phrases.cloud'; // クラウド連携の設定（URL・合言葉）。学習記録とは別に保存し、書き出しには含めない
   const CLOUD_URL_RE = /^https:\/\/script\.google\.com\/(?:a\/[^/]+\/)?macros\/s\/[\w-]+\/exec$/;
   const loadCloud = () => {
-    const base = { url: '', key: '', enabled: false, dirty: false, last: '', error: '' };
+    const base = { url: '', key: '', user: '', enabled: false, dirty: false, last: '', error: '' };
     try { return Object.assign(base, JSON.parse(localStorage.getItem(CLOUD_KEY) || '{}')); } catch (e) { return base; }
   };
   let cloud = loadCloud();
@@ -679,6 +679,8 @@
       <p class="sub">学習記録を、自分のGoogleスプレッドシートに自動でバックアップします。先にスプレッドシート側の準備が必要です（READMEの「クラウドにバックアップする」）。始めるまで、何も送信しません。</p>
       <label class="field">スクリプトのURL<input id="cloud-url" value="${esc(cloud.url)}" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
       <label class="field">合言葉<input id="cloud-key" value="${esc(cloud.key)}" autocomplete="off" autocapitalize="off" spellcheck="false"></label>
+      <label class="field">あなたの名前（記録を入れる場所の名前）<input id="cloud-user" value="${esc(cloud.user)}" placeholder="例：たろう" maxlength="20" autocomplete="off"></label>
+      <p class="sub" style="margin-top:-4px">1つのスプレッドシートを2人で使うときは、<b>別々の名前</b>にしてください。同じ名前だと、お互いの記録を上書きします。</p>
       <div class="note" id="cloud-status">状態：${esc(cloudStatusText())}</div>
       <div class="stack" style="margin-top:12px">
         ${cloud.enabled ? `
@@ -721,7 +723,7 @@
     const res = await fetch(cloud.url, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // プリフライトを避けるため text/plain で送る
-      body: JSON.stringify(Object.assign({ key: cloud.key, action }, extra)),
+      body: JSON.stringify(Object.assign({ key: cloud.key, user: cloud.user, action }, extra)),
       keepalive: !!keepalive,
     });
     let j;
@@ -765,6 +767,7 @@
   function cloudReady() {
     if (!CLOUD_URL_RE.test(cloud.url)) { toast('URLは https://script.google.com/…/exec の形で入力してください'); return false; }
     if (!cloud.key) { toast('合言葉を入力してください'); return false; }
+    if (!cloud.user || cloud.user.length > 20 || /[[\]*?:/\\]/.test(cloud.user)) { toast('名前は20文字以内で入力してください（[ ] * ? : / \\ は使えません）'); return false; }
     return true;
   }
   async function cloudRestore() {
@@ -875,7 +878,7 @@
         if (el.dataset.v === 'restore') ok = await cloudRestore();
         else {
           const info = await cloudCall('ping');
-          if (info.count && !confirm(`クラウドには、すでに ${info.count} 件のデータがあります（${fmtTime(info.updatedAt)} 保存）。この端末のデータで上書きしますか？\n※前の日までのデータは、シートの backup_prev に1世代だけ残ります。`)) return;
+          if (info.count && !confirm(`「${cloud.user}」の名前で、クラウドにすでに ${info.count} 件のデータがあります（${fmtTime(info.updatedAt)} 保存）。この端末のデータで上書きしますか？\n※別の人の記録なら、キャンセルして名前を変えてください。前の日までのデータは、シート backup_prev_${cloud.user} に1世代だけ残ります。`)) return;
           await cloudUpload();
           ok = true;
         }
@@ -905,7 +908,7 @@
     },
     importText: () => importJSON(document.getElementById('import-text').value),
     reset: () => {
-      if (confirm('登録したフレーズと学習記録をすべて消して、初期の15フレーズに戻します。よろしいですか？' + (cloud.enabled ? '\n※クラウドのバックアップも、この初期状態で上書きされます（前の日までの分は backup_prev に残ります）。' : ''))) {
+      if (confirm('登録したフレーズと学習記録をすべて消して、初期の15フレーズに戻します。よろしいですか？' + (cloud.enabled ? '\n※クラウドのバックアップも、この初期状態で上書きされます（前の日までの分は backup_prev_名前 のシートに残ります）。' : ''))) {
         stop(); state = seedState(state.settings.speaker); save(); toast('初期状態に戻しました'); render();
       }
     },
@@ -925,6 +928,7 @@
     else if (e.target.id === 'ai-scene') aiScene = e.target.value;
     else if (e.target.id === 'cloud-url') { cloud.url = e.target.value.trim(); saveCloud(); }
     else if (e.target.id === 'cloud-key') { cloud.key = e.target.value.trim(); saveCloud(); }
+    else if (e.target.id === 'cloud-user') { cloud.user = e.target.value.trim(); saveCloud(); }
     if (e.target.id === 'q') {
       listUI.q = e.target.value;
       document.getElementById('items').innerHTML = itemsHTML();
@@ -950,7 +954,7 @@
     if (document.visibilityState === 'hidden') {
       clearTimeout(cloudTimer);
       try {
-        const body = JSON.stringify({ key: cloud.key, action: 'save', savedAt: new Date().toISOString(), data: JSON.parse(exportJSON()) });
+        const body = JSON.stringify({ key: cloud.key, user: cloud.user, action: 'save', savedAt: new Date().toISOString(), data: JSON.parse(exportJSON()) });
         if (body.length < 60000) fetch(cloud.url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body, keepalive: true }).catch(() => {});
       } catch (e) { /* 次に開いたときに送り直す（dirty は残す） */ }
     } else { cloudQueue(); }
