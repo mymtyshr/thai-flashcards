@@ -8,6 +8,7 @@
 - `style.css` … 見た目（ライト/ダーク対応）
 - `sw.js` … オフライン用Service Worker
 - `manifest.webmanifest`, `icon*.png`, `icon.svg` … PWA用。通常は触らない
+- `artifact/host.js`, `artifact/build.mjs` … Claude Artifact版（claude.ai内で動かす別の配布）用。`host.js` が `window.thaiHost`（保存先を `db` に、AIを `sample` に、書き出しを `downloads` に差し替える）を用意し、`build.mjs` が `app.js`・`style.css` と合わせて1枚のHTMLにする。`app.js` の差し替えは `HOST` がある場合だけ働かせ、ブラウザ版の動作は変えない。**`confirm()` は直接使わず、`askOk()` を使う**（Artifactでは `confirm()` が常に「いいえ」）
 - `cloud/Code.gs` … 利用者がGoogleスプレッドシートに貼るバックアップ用スクリプト（アプリからは配信・読み込みしない）。送受信の書式を変えたら、`app.js` のクラウド連携と一緒に直す。「AIに提案してもらう」では、このスクリプトが、アプリの作った依頼文をAnthropic APIへ送る（APIキーはスクリプトのプロパティ `ANTHROPIC_API_KEY` だけ。アプリ・リポジトリには入れない）。アプリがAIに直接つなぐ実装にはしない。AIが追加したフレーズには、確認するまで `ai: true`（一覧・カードに「AI・未確認」と出す）の印を付ける。「確認した」を押すと印を消す。印を付けずに追加する実装にしない
 - ビルド工程なし、外部ライブラリなし、サーバーなし。素のHTML/CSS/JSのまま保つ
 
