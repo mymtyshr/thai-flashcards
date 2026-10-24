@@ -21,7 +21,7 @@ function doGet() {
 function doPost(e) {
   try {
     const req = JSON.parse(e.postData.contents);
-    if (SECRET === 'ここを自分だけの合言葉に変える') return out_({ ok: false, error: 'スクリプトの SECRET（合言葉）を書き換えてください' });
+    if (SECRET.indexOf('ここを') === 0) return out_({ ok: false, error: 'スクリプトの SECRET（合言葉）を書き換えてください' });
     if (!req || req.key !== SECRET) return out_({ ok: false, error: '合言葉が違います' });
     const user = userOf_(req);
     const lock = LockService.getScriptLock();
