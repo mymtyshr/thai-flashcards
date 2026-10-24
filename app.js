@@ -293,7 +293,8 @@
         <button class="btn primary" data-action="startFlash" data-mode="all">フラッシュカードを始める</button>
         <button class="btn" data-action="startFlash" data-mode="unlearned">まだのカードだけ復習（${rest}）</button>
         <button class="btn" data-action="nav" data-view="list">フレーズ一覧</button>
-        <button class="btn" data-action="add">フレーズを追加</button>
+        <button class="btn" data-action="nav" data-view="bulk">まとめて追加（AIで作る）</button>
+        <button class="btn" data-action="add">手動でフレーズを追加</button>
       </div>`;
   }
 
@@ -407,8 +408,8 @@
       <div class="chips">${chips}</div>
       <div id="items">${itemsHTML()}</div>
       <div class="stack" style="margin-top:8px">
-        <button class="btn primary" data-action="add">フレーズを追加</button>
-        <button class="btn" data-action="nav" data-view="bulk">まとめて追加</button>
+        <button class="btn primary" data-action="nav" data-view="bulk">まとめて追加（AIで作る）</button>
+        <button class="btn" data-action="add">手動でフレーズを追加</button>
       </div>`;
   }
 
@@ -472,6 +473,16 @@
   // 「まとめて追加」に貼る前提の、AIへの依頼文
   function buildPhrasePrompt(scene, n) {
     const sp = speakerOf();
+    // 参考として、登録済みのフレーズ（覚えた／まだ）を載せる。長くなりすぎないよう各50件まで
+    const LIMIT = 50;
+    const refs = (title, list) => {
+      if (!list.length) return [];
+      const shown = list.slice(0, LIMIT).map((p) => `- ${p.ja}｜${p.th}`);
+      if (list.length > LIMIT) shown.push(`- ほか${list.length - LIMIT}件`);
+      return ['', title, ...shown];
+    };
+    const known = state.phrases.filter((p) => p.learned).sort((a, b) => (b.learnedAt || '').localeCompare(a.learnedAt || ''));
+    const rest = state.phrases.filter((p) => !p.learned);
     return [
       'タイ語の旅行フレーズ帳アプリに追加するフレーズを作ってください。',
       '',
@@ -492,7 +503,11 @@
       '',
       '【内容の条件】',
       '- 旅行者がそのまま使える、短く自然な表現にしてください。',
+      '- 下の「登録済み」のフレーズと、同じ内容のものは作らないでください。',
+      '- 「覚えたフレーズ」は、今の難しさの目安です。同じくらい、または少しだけ難しい表現にしてください。',
       '- 声調・綴り・和訳に自信がないものは、コードブロックの外に、どのフレーズか書いてください。自信があるふりをしないでください。',
+      ...refs('【登録済み：覚えたフレーズ（新しい順）】', known),
+      ...refs('【登録済み：まだ覚えていないフレーズ】', rest),
     ].join('\n');
   }
   function vBulk() {
