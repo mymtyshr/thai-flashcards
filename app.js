@@ -322,6 +322,7 @@
         <div class="stat"><b>${learned}</b><span>覚えた</span></div>
         <div class="stat"><b>${rest}</b><span>まだ</span></div>
       </div>
+      ${total ? '' : '<div class="note" style="margin-bottom:12px">フレーズがありません。「まとめて追加」でAIに作ってもらうか、設定の「初期の15フレーズに戻す」で入れ直せます。</div>'}
       <div class="bar" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><i style="width:${pct}%"></i></div>
       <div class="stack">
         <button class="btn primary" data-action="startFlash" data-mode="all">フラッシュカードを始める</button>
@@ -772,6 +773,7 @@
         <label class="field" style="margin:0">貼り付けて復元<textarea id="import-text" placeholder="コピーしたJSONをここに貼り付け"></textarea></label>
         <button class="btn" data-action="importText">貼り付けた内容で復元</button>
         <button class="btn danger" data-action="reset">初期の15フレーズに戻す</button>
+        <button class="btn danger" data-action="deleteAll">フレーズをすべて削除</button>
       </div>
 
       ${HOST ? '' : `
@@ -863,7 +865,7 @@
   }
   // 記録を変えたら、少し待ってからまとめて送る（連携を始めた端末だけ）
   function cloudQueue() {
-    if (!cloud.enabled || !CLOUD_URL_RE.test(cloud.url)) return;
+    if (!cloud.enabled || !CLOUD_URL_RE.test(cloud.url) || !state.phrases.length) return; // フレーズが空のときは送らない（クラウドの控えを残す）
     cloud.dirty = true; saveCloud(); updateCloudStatus();
     clearTimeout(cloudTimer);
     cloudTimer = setTimeout(cloudFlush, 4000);
@@ -1114,6 +1116,20 @@
       cloud.enabled = false; cloud.dirty = false; clearTimeout(cloudTimer); saveCloud(); render();
     },
     importText: () => importJSON(document.getElementById('import-text').value),
+    // すべてのフレーズ（と、その学習記録）を消す。設定（話し手・再生速度など）は残す。取り消せないので、2回確認する
+    deleteAll: async () => {
+      const n = state.phrases.length;
+      if (!n) return toast('削除するフレーズがありません');
+      if (!(await askOk(`登録されている ${n} 件のフレーズと、学習記録をすべて削除します。元に戻せません。\n先に「JSONとして書き出す」でバックアップしておくと安心です。\n\n削除しますか？`))) return;
+      if (!(await askOk(`本当に、${n} 件すべてを削除しますか？`))) return;
+      stop(); sugg = null;
+      state.phrases = [];
+      flash = { queue: [], i: 0, shown: false, mode: 'all' };
+      listUI = { q: '', cat: '', ai: false };
+      save();
+      toast(`${n}件を削除しました`);
+      go('home');
+    },
     reset: async () => {
       if (await askOk('登録したフレーズと学習記録をすべて消して、初期の15フレーズに戻します。よろしいですか？' + (cloud.enabled ? '\n※クラウドのバックアップも、この初期状態で上書きされます（前の日までの分は backup_prev_名前 のシートに残ります）。' : ''))) {
         stop(); state = seedState(state.settings.speaker); save(); toast('初期状態に戻しました'); render();
