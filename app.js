@@ -28,6 +28,14 @@
     ['英語を話せますか？', 'พูดภาษาอังกฤษได้ไหมครับ', 'プーッ パーサー アングリッ ダイ マイ クラップ', '挨拶', 'พูด＝話す＝pʰûːt̚＝プーッ；ภาษาอังกฤษ＝英語＝pʰaː.sǎː.ʔaŋ.krìt̚＝パーサーアングリッ；ได้ไหม＝できますか＝dâj.mǎj＝ダイマイ；ครับ＝（男性の丁寧な語尾）＝kʰráp̚＝クラップ'],
   ];
 
+  // 女性用の初期フレーズ。男性用の語尾 ครับ を、疑問文は คะ、それ以外は ค่ะ に替えたもの
+  const SEED_QUESTIONS = ['ราคาเท่าไหร่ครับ', 'ห้องน้ำอยู่ที่ไหนครับ', 'ลดหน่อยได้ไหมครับ', 'พูดภาษาอังกฤษได้ไหมครับ'];
+  const SEED_F = SEED.map(([ja, th, kana, cat, wd]) => {
+    const end = SEED_QUESTIONS.includes(th) ? 'คะ' : 'ค่ะ';
+    return [ja, th.replace(/ครับ$/, end), kana.replace(/クラップ$/, 'カ'),
+      cat, wd.replace(/ครับ＝（男性の丁寧な語尾）＝[^＝；]*＝クラップ$/, `${end}＝（女性の丁寧な語尾）＝kʰaʔ＝カ`)];
+  });
+
   const noTone = (t) => String(t || '').normalize('NFD').replace(/[\u0300\u0301\u0302\u030C\u0303]/g, '').normalize('NFC');
 
   // 単語分解の書式：「タイ語＝和訳＝発音記号＝カタカナ」（発音記号・カタカナは省略可）を ； か改行で区切る
@@ -42,7 +50,7 @@
   const wordsToText = (ws) => (ws || []).map((w) => `${w.th}＝${w.ja}${w.pron || w.kana ? '＝' + noTone(w.pron) : ''}${w.kana ? '＝' + w.kana : ''}`).join('\n');
   let seedWordsCache = null;
   function seedWords() {
-    if (!seedWordsCache) { seedWordsCache = {}; SEED.forEach((r) => { seedWordsCache[r[1]] = parseWords(r[4]); }); }
+    if (!seedWordsCache) { seedWordsCache = {}; SEED.concat(SEED_F).forEach((r) => { seedWordsCache[r[1]] = parseWords(r[4]); }); }
     return seedWordsCache;
   }
 
@@ -63,7 +71,7 @@
   }
 
   /* ---------------- state / storage ---------------- */
-  const defaultSettings = () => ({ rate: 0.7, repeat: 1, autoplay: false, voiceURI: '', pronMode: 'ipa' });
+  const defaultSettings = () => ({ rate: 0.7, repeat: 1, autoplay: false, voiceURI: '', pronMode: 'ipa', speaker: 'male' });
 
   function normalize(s) {
     const out = {
@@ -95,14 +103,20 @@
     if (sameAsSeed && ws.every((w) => !w.pron)) return seed;
     return ws;
   }
-  function seedState() {
-    return normalize({ phrases: SEED.map(([ja, th, kana, cat, wd]) => ({ ja, th, kana, cat, words: parseWords(wd) })) });
+  function seedState(speaker) {
+    const rows = speaker === 'female' ? SEED_F : SEED;
+    return normalize({
+      phrases: rows.map(([ja, th, kana, cat, wd]) => ({ ja, th, kana, cat, words: parseWords(wd) })),
+      settings: { speaker: speaker === 'female' ? 'female' : 'male' },
+    });
   }
+  let firstRun = false; // 保存データがないとき（初回）は、最初に話し手を選んでもらう
   function load() {
     try {
       const raw = localStorage.getItem(KEY);
       if (raw) { const s = JSON.parse(raw); if (s && Array.isArray(s.phrases)) return normalize(s); }
     } catch (e) { /* 壊れたデータは初期値に戻す */ }
+    firstRun = true;
     return seedState();
   }
   let state = load();
@@ -230,12 +244,27 @@
     stop();
     if (view !== 'bulk') { bulkResult = ''; }
     reportText = '';
+    aiPrompt = '';
     currentView = view;
     render();
     window.scrollTo(0, 0);
   }
 
+  function vSetup() {
+    return `
+      <h1>はじめに</h1>
+      <p class="sub">タイ語は、話す人の性別で文末の言い方が変わります（男性は ครับ、女性は ค่ะ・คะ）。あなたの言い方を選んでください。最初に入るフレーズが、その言い方になります。</p>
+      <div class="stack">
+        <button class="btn primary" data-action="setup" data-v="male">男性の言い方（ครับ）</button>
+        <button class="btn primary" data-action="setup" data-v="female">女性の言い方（ค่ะ・คะ）</button>
+      </div>
+      <p class="sub" style="margin-top:16px">あとから設定画面で変えられます。ただし、すでに入っているフレーズの語尾は変わりません。</p>`;
+  }
+
   function render() {
+    const tabbar = document.querySelector('.tabbar');
+    if (tabbar) tabbar.style.display = firstRun ? 'none' : '';
+    if (firstRun) { $view.innerHTML = vSetup(); return; }
     const fn = { home: vHome, flash: vFlash, list: vList, form: vForm, bulk: vBulk, settings: vSettings }[currentView] || vHome;
     $view.innerHTML = fn();
     const tab = (currentView === 'form' || currentView === 'bulk') ? 'list' : currentView;
@@ -423,18 +452,86 @@
   /* --- bulk add --- */
   let bulkText = '';
   let bulkResult = '';
+  let aiScene = '', aiCount = 10, aiPrompt = '';
+  const segHTML = (action, name, vals, cur, fmt) => `<div class="seg" role="group">${vals.map((v) =>
+    `<button data-action="${action}" data-k="${name}" data-v="${v}" aria-pressed="${String(cur) === String(v)}">${fmt(v)}</button>`).join('')}</div>`;
+  // 話し手（男性 ครับ／女性 ค่ะ・คะ）に合わせた、AIへの指定と書式の例
+  const SPEAKER = {
+    male: {
+      ask: '男性が丁寧に話す形にしてください（文末は ครับ）。',
+      end: 'ครับ＝（男性の丁寧な語尾）＝kʰrap̚＝クラップ',
+      ex: 'メニューをください｜ขอเมนูครับ｜コー メーヌー クラップ｜レストラン｜ขอ＝〜をください＝kʰɔː＝コー；เมนู＝メニュー＝meː.nuː＝メーヌー；ครับ＝（男性の丁寧な語尾）＝kʰrap̚＝クラップ',
+    },
+    female: {
+      ask: '女性が丁寧に話す形にしてください（平叙文・お願いの文末は ค่ะ、疑問文の文末は คะ）。',
+      end: 'ค่ะ＝（女性の丁寧な語尾）＝kʰaʔ＝カ',
+      ex: 'メニューをください｜ขอเมนูค่ะ｜コー メーヌー カ｜レストラン｜ขอ＝〜をください＝kʰɔː＝コー；เมนู＝メニュー＝meː.nuː＝メーヌー；ค่ะ＝（女性の丁寧な語尾）＝kʰaʔ＝カ',
+    },
+  };
+  const speakerOf = () => SPEAKER[state.settings.speaker] || SPEAKER.male;
+  // 「まとめて追加」に貼る前提の、AIへの依頼文
+  function buildPhrasePrompt(scene, n) {
+    const sp = speakerOf();
+    return [
+      'タイ語の旅行フレーズ帳アプリに追加するフレーズを作ってください。',
+      '',
+      `【場面】${scene}`,
+      `【件数】${n}個`,
+      `【話し手】${sp.ask}`,
+      `【既存のカテゴリー】${categories().join('、')}（できるだけこの中から選び、合わなければ新しく作ってよい）`,
+      '',
+      '【出力の書式】',
+      '- コードブロック1つだけに入れて、1行1フレーズで出してください。コードブロックの中には、番号・箇条書き記号・見出し・説明文を入れないでください。',
+      '- 1行の形式：日本語｜タイ語｜カタカナ｜カテゴリー｜単語分解',
+      '- 区切りは全角の縦線「｜」です。',
+      '- カタカナは、語の間を半角スペースで区切ってください。',
+      '- 単語分解は、フレーズを先頭から順に「タイ語＝和訳＝発音記号＝カタカナ」を全角の「；」でつないでください。発音記号はIPAで、声調記号は付けないでください（長音「ː」と無開放「̚」は付けてよい）。',
+      '',
+      '例：',
+      sp.ex,
+      '',
+      '【内容の条件】',
+      '- 旅行者がそのまま使える、短く自然な表現にしてください。',
+      '- 声調・綴り・和訳に自信がないものは、コードブロックの外に、どのフレーズか書いてください。自信があるふりをしないでください。',
+    ].join('\n');
+  }
   function vBulk() {
+    const s = state.settings;
     return `
       <h1>まとめて追加</h1>
-      <p class="sub">1行に1フレーズ。<b>日本語｜タイ語｜カタカナ｜カテゴリー｜単語分解</b> の順に、縦線（｜ または |）かタブで区切ります。カタカナ以降は省略できます。単語分解は「タイ語＝和訳＝発音記号＝カタカナ」を ； でつなぎます（発音記号とカタカナは省略可）。</p>
-      <div class="note" lang="th" style="margin-bottom:12px"><span lang="ja">例：</span><br>メニューをください｜ขอเมนูครับ｜コー メーヌー クラップ｜レストラン｜ขอ＝〜をください＝kʰɔː；เมนู＝メニュー＝meː.nuː；ครับ＝（丁寧な語尾）＝kʰrap̚<br>おいしい｜อร่อยครับ</div>
+      <h2>① AIに作ってもらう</h2>
+      <p class="sub">場面を入れて、AIに送る文章をコピーします。ChatGPTやClaudeなど、お使いのAIのチャットに貼り付けてください。</p>
+      <label class="field">どんな場面のフレーズ？<input id="ai-scene" value="${esc(aiScene)}" placeholder="例：美容院、歯医者、タクシー、友だちとの会話" autocomplete="off"></label>
+      <div class="setting"><span>件数</span><div class="seg" role="group">${[10, 20, 30].map((v) =>
+        `<button data-action="aiCount" data-v="${v}" aria-pressed="${aiCount === v}">${v}個</button>`).join('')}</div></div>
+      <div class="setting"><span>話し手</span>${segHTML('set', 'speaker', ['male', 'female'], s.speaker || 'male', (v) => ({ male: '男性（ครับ）', female: '女性（ค่ะ）' }[v]))}</div>
+      <div class="stack" style="margin-top:12px">
+        <button class="btn primary" data-action="copyPrompt">AIに送る文章をコピー</button>
+        ${aiPrompt ? `<label class="field" style="margin:0">コピーできなかったときは、全選択してコピーしてください<textarea id="ai-prompt" readonly style="min-height:160px">${esc(aiPrompt)}</textarea></label>` : ''}
+      </div>
+
+      <h2>② AIの答えを貼り付ける</h2>
+      <p class="sub">AIが出したコードブロックの中身を、そのまま貼り付けてください。番号や「-」、コードブロックの線が付いていても読み取ります。すでに登録済みのフレーズは追加されません。</p>
       <label class="field">フレーズ<textarea id="bulk-text" style="min-height:220px" placeholder="ここに貼り付け">${esc(bulkText)}</textarea></label>
       <label class="field">カテゴリー未指定の行に使う名前<input id="bulk-cat" value="その他" autocomplete="off"></label>
       <div class="row">
         <button class="btn" data-action="nav" data-view="list">戻る</button>
         <button class="btn primary" data-action="bulkAdd">追加する</button>
       </div>
-      ${bulkResult ? `<div class="note" style="margin-top:12px">${bulkResult}</div>` : ''}`;
+      ${bulkResult ? `<div class="note" style="margin-top:12px">${bulkResult}</div>` : ''}
+
+      <details style="margin-top:20px">
+        <summary>書式の詳細（手で書くとき）</summary>
+        <p class="sub">1行に1フレーズ。<b>日本語｜タイ語｜カタカナ｜カテゴリー｜単語分解</b> の順に、縦線（｜ または |）かタブで区切ります。カタカナ以降は省略できます。単語分解は「タイ語＝和訳＝発音記号＝カタカナ」を ； でつなぎます（発音記号とカタカナは省略可）。</p>
+        <div class="note" lang="th"><span lang="ja">例：</span><br>${esc(SPEAKER.male.ex)}<br>おいしい｜อร่อยครับ</div>
+      </details>`;
+  }
+  // AIの出力に混ざりやすい飾り（コードブロックの線・番号・箇条書き・表の枠線）を取り除く。空文字なら読み飛ばす行
+  function cleanBulkLine(line) {
+    let t = line.trim();
+    if (!t || /^```/.test(t) || /^\|?\s*:?-{2,}/.test(t)) return '';
+    t = t.replace(/^(?:[-*・•]\s+|\d+[.)．、]\s*)/, '').replace(/^[|｜]\s*/, '').replace(/\s*[|｜]$/, '');
+    return t;
   }
   function bulkAdd() {
     const text = document.getElementById('bulk-text').value;
@@ -443,10 +540,12 @@
     let added = 0;
     const skipped = [];
     const retry = []; // 書式の誤りで追加できなかった行だけ残す
-    text.split(/\r?\n/).forEach((line, i) => {
-      if (!line.trim()) return;
+    text.split(/\r?\n/).forEach((raw, i) => {
+      const line = cleanBulkLine(raw);
+      if (!line) return;
       const [ja = '', th = '', kana = '', cat = '', wd = ''] = line.split(/\t|\s*[|｜]\s*/).map((x) => x.trim());
       const n = i + 1;
+      if (ja === '日本語' && /タイ語/.test(th)) return; // 表の見出し行
       if (!ja || !th) { retry.push(line); return skipped.push(`${n}行目：日本語かタイ語が空です`); }
       if (!THAI_RE.test(th)) { retry.push(line); return skipped.push(`${n}行目：タイ語の欄にタイ文字がありません`); }
       const key = th.replace(/\s+/g, '');
@@ -494,7 +593,7 @@
     L.push('【依頼】上の状況をもとに、次に学ぶべきフレーズを10個提案してください。');
     L.push('- 苦手なフレーズは、覚え方のコツも添えてください。');
     L.push('- 新しいフレーズは「日本語｜タイ語｜カタカナ｜カテゴリー｜単語分解」の形式で、1行1フレーズで出してください（アプリの「まとめて追加」に貼るため）。単語分解は「タイ語＝和訳＝発音記号」を ； でつないでください（例：ขอ＝〜をください＝kʰɔː；น้ำเปล่า＝水＝naːm.plaw；ครับ＝丁寧な語尾＝kʰrap̚）。発音記号はIPAで、声調記号は付けないでください。');
-    L.push('- 男性が丁寧に話す「ครับ」で終わる形にしてください。');
+    L.push('- ' + speakerOf().ask);
     L.push('- 声調や自然さに自信がないものは、そう書いてください。');
     return L.join('\n');
   }
@@ -502,8 +601,7 @@
   /* --- settings --- */
   function vSettings() {
     const s = state.settings;
-    const seg = (name, vals, cur, fmt) => `<div class="seg" role="group">${vals.map((v) =>
-      `<button data-action="set" data-k="${name}" data-v="${v}" aria-pressed="${String(cur) === String(v)}">${fmt(v)}</button>`).join('')}</div>`;
+    const seg = (name, vals, cur, fmt) => segHTML('set', name, vals, cur, fmt);
     const voiceSel = thVoices.length > 1
       ? `<label class="field">タイ語の音声<select data-setting="voiceURI">${thVoices.map((v) =>
         `<option value="${esc(v.voiceURI)}" ${pickVoice() === v ? 'selected' : ''}>${esc(v.name)}（${esc(v.lang)}）</option>`).join('')}</select></label>`
@@ -517,6 +615,7 @@
       ${status}
       <div class="setting"><span>再生速度</span>${seg('rate', [0.5, 0.7, 1], s.rate, (v) => v + '倍')}</div>
       <div class="setting"><span>繰り返し</span>${seg('repeat', [1, 3], s.repeat, (v) => v + '回')}</div>
+      <div class="setting"><span>話し手（AIへの依頼文・初期フレーズ）</span>${seg('speaker', ['male', 'female'], s.speaker || 'male', (v) => ({ male: '男性（ครับ）', female: '女性（ค่ะ）' }[v]))}</div>
       <div class="setting"><span>単語の発音表示</span>${seg('pronMode', ['ipa', 'kana', 'both'], s.pronMode, (v) => ({ ipa: '発音記号', kana: 'カタカナ', both: '両方' }[v]))}</div>
       <label class="check"><input type="checkbox" data-setting="autoplay" ${s.autoplay ? 'checked' : ''}>カードをめくったとき自動で再生</label>
       ${voiceSel}
@@ -648,10 +747,24 @@
         toast('自動コピーに失敗しました。下の欄から手動でコピーしてください');
       }
     },
+    setup: (el) => { state = seedState(el.dataset.v); firstRun = false; save(); render(); },
+    aiCount: (el) => { aiCount = Number(el.dataset.v); render(); },
+    copyPrompt: async () => {
+      const scene = aiScene.trim();
+      if (!scene) { toast('どんな場面か、先に入力してください'); const i = document.getElementById('ai-scene'); if (i) i.focus(); return; }
+      const text = buildPhrasePrompt(scene, aiCount);
+      try { await navigator.clipboard.writeText(text); aiPrompt = ''; toast('コピーしました。AIのチャットに貼り付けてください'); }
+      catch (e) {
+        aiPrompt = text; render();
+        const ta = document.getElementById('ai-prompt');
+        if (ta) { ta.focus(); ta.select(); }
+        toast('自動コピーに失敗しました。下の欄から手動でコピーしてください');
+      }
+    },
     importText: () => importJSON(document.getElementById('import-text').value),
     reset: () => {
       if (confirm('登録したフレーズと学習記録をすべて消して、初期の15フレーズに戻します。よろしいですか？')) {
-        stop(); state = seedState(); save(); toast('初期状態に戻しました'); render();
+        stop(); state = seedState(state.settings.speaker); save(); toast('初期状態に戻しました'); render();
       }
     },
   };
@@ -666,6 +779,8 @@
     if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('.card[data-action]')) { e.preventDefault(); ACTIONS.flip(); }
   });
   document.addEventListener('input', (e) => {
+    if (e.target.id === 'bulk-text') bulkText = e.target.value;
+    else if (e.target.id === 'ai-scene') aiScene = e.target.value;
     if (e.target.id === 'q') {
       listUI.q = e.target.value;
       document.getElementById('items').innerHTML = itemsHTML();
