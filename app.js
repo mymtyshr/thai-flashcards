@@ -384,9 +384,7 @@
       <div class="card${p.learned ? ' known' : ''}" data-action="flip" role="button" tabindex="0" aria-label="カードをめくる">${face}</div>
       <div class="nav-row">
         <button class="btn" data-action="prev" ${flash.i === 0 ? 'disabled' : ''}>前へ</button>
-        ${HOST
-          ? `<button class="btn danger" data-action="del" data-id="${esc(p.id)}">削除</button>` // Artifact版：答え／隠すボタンは出さず（カードをタップでめくる）、このフレーズの削除を置く
-          : `<button class="btn" data-action="flip">${flash.shown ? '隠す' : '答え'}</button>`}
+        <button class="btn danger" data-action="del" data-id="${esc(p.id)}">削除</button>
         <button class="btn" data-action="next" ${flash.i >= q.length - 1 ? 'disabled' : ''}>次へ</button>
       </div>
       <div class="row">
