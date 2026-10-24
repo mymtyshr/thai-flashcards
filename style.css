@@ -199,3 +199,5 @@ details summary { min-height: 44px; display: flex; align-items: center; color: v
 .sug-main .sug-th { display: block; font-size: 20px; font-weight: 600; margin-top: 2px; overflow-wrap: anywhere; }
 .sug-main .sug-kana { display: block; font-size: 14px; color: var(--ink); }
 .sug-main small { display: block; font-size: 12px; color: var(--sub); margin-top: 2px; }
+
+.tag.ai { background: var(--warn-bg); color: var(--warn); }
