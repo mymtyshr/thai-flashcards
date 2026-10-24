@@ -28,6 +28,14 @@
     ['英語を話せますか？', 'พูดภาษาอังกฤษได้ไหมครับ', 'プーッ パーサー アングリッ ダイ マイ クラップ', '挨拶', 'พูด＝話す＝pʰûːt̚＝プーッ；ภาษาอังกฤษ＝英語＝pʰaː.sǎː.ʔaŋ.krìt̚＝パーサーアングリッ；ได้ไหม＝できますか＝dâj.mǎj＝ダイマイ；ครับ＝（男性の丁寧な語尾）＝kʰráp̚＝クラップ'],
   ];
 
+  // 女性用の初期フレーズ。男性用の語尾 ครับ を、疑問文は คะ、それ以外は ค่ะ に替えたもの
+  const SEED_QUESTIONS = ['ราคาเท่าไหร่ครับ', 'ห้องน้ำอยู่ที่ไหนครับ', 'ลดหน่อยได้ไหมครับ', 'พูดภาษาอังกฤษได้ไหมครับ'];
+  const SEED_F = SEED.map(([ja, th, kana, cat, wd]) => {
+    const end = SEED_QUESTIONS.includes(th) ? 'คะ' : 'ค่ะ';
+    return [ja, th.replace(/ครับ$/, end), kana.replace(/クラップ$/, 'カ'),
+      cat, wd.replace(/ครับ＝（男性の丁寧な語尾）＝[^＝；]*＝クラップ$/, `${end}＝（女性の丁寧な語尾）＝kʰaʔ＝カ`)];
+  });
+
   const noTone = (t) => String(t || '').normalize('NFD').replace(/[\u0300\u0301\u0302\u030C\u0303]/g, '').normalize('NFC');
 
   // 単語分解の書式：「タイ語＝和訳＝発音記号＝カタカナ」（発音記号・カタカナは省略可）を ； か改行で区切る
@@ -42,7 +50,7 @@
   const wordsToText = (ws) => (ws || []).map((w) => `${w.th}＝${w.ja}${w.pron || w.kana ? '＝' + noTone(w.pron) : ''}${w.kana ? '＝' + w.kana : ''}`).join('\n');
   let seedWordsCache = null;
   function seedWords() {
-    if (!seedWordsCache) { seedWordsCache = {}; SEED.forEach((r) => { seedWordsCache[r[1]] = parseWords(r[4]); }); }
+    if (!seedWordsCache) { seedWordsCache = {}; SEED.concat(SEED_F).forEach((r) => { seedWordsCache[r[1]] = parseWords(r[4]); }); }
     return seedWordsCache;
   }
 
@@ -95,14 +103,20 @@
     if (sameAsSeed && ws.every((w) => !w.pron)) return seed;
     return ws;
   }
-  function seedState() {
-    return normalize({ phrases: SEED.map(([ja, th, kana, cat, wd]) => ({ ja, th, kana, cat, words: parseWords(wd) })) });
+  function seedState(speaker) {
+    const rows = speaker === 'female' ? SEED_F : SEED;
+    return normalize({
+      phrases: rows.map(([ja, th, kana, cat, wd]) => ({ ja, th, kana, cat, words: parseWords(wd) })),
+      settings: { speaker: speaker === 'female' ? 'female' : 'male' },
+    });
   }
+  let firstRun = false; // 保存データがないとき（初回）は、最初に話し手を選んでもらう
   function load() {
     try {
       const raw = localStorage.getItem(KEY);
       if (raw) { const s = JSON.parse(raw); if (s && Array.isArray(s.phrases)) return normalize(s); }
     } catch (e) { /* 壊れたデータは初期値に戻す */ }
+    firstRun = true;
     return seedState();
   }
   let state = load();
@@ -236,7 +250,21 @@
     window.scrollTo(0, 0);
   }
 
+  function vSetup() {
+    return `
+      <h1>はじめに</h1>
+      <p class="sub">タイ語は、話す人の性別で文末の言い方が変わります（男性は ครับ、女性は ค่ะ・คะ）。あなたの言い方を選んでください。最初に入るフレーズが、その言い方になります。</p>
+      <div class="stack">
+        <button class="btn primary" data-action="setup" data-v="male">男性の言い方（ครับ）</button>
+        <button class="btn primary" data-action="setup" data-v="female">女性の言い方（ค่ะ・คะ）</button>
+      </div>
+      <p class="sub" style="margin-top:16px">あとから設定画面で変えられます。ただし、すでに入っているフレーズの語尾は変わりません。</p>`;
+  }
+
   function render() {
+    const tabbar = document.querySelector('.tabbar');
+    if (tabbar) tabbar.style.display = firstRun ? 'none' : '';
+    if (firstRun) { $view.innerHTML = vSetup(); return; }
     const fn = { home: vHome, flash: vFlash, list: vList, form: vForm, bulk: vBulk, settings: vSettings }[currentView] || vHome;
     $view.innerHTML = fn();
     const tab = (currentView === 'form' || currentView === 'bulk') ? 'list' : currentView;
@@ -587,6 +615,7 @@
       ${status}
       <div class="setting"><span>再生速度</span>${seg('rate', [0.5, 0.7, 1], s.rate, (v) => v + '倍')}</div>
       <div class="setting"><span>繰り返し</span>${seg('repeat', [1, 3], s.repeat, (v) => v + '回')}</div>
+      <div class="setting"><span>話し手（AIへの依頼文・初期フレーズ）</span>${seg('speaker', ['male', 'female'], s.speaker || 'male', (v) => ({ male: '男性（ครับ）', female: '女性（ค่ะ）' }[v]))}</div>
       <div class="setting"><span>単語の発音表示</span>${seg('pronMode', ['ipa', 'kana', 'both'], s.pronMode, (v) => ({ ipa: '発音記号', kana: 'カタカナ', both: '両方' }[v]))}</div>
       <label class="check"><input type="checkbox" data-setting="autoplay" ${s.autoplay ? 'checked' : ''}>カードをめくったとき自動で再生</label>
       ${voiceSel}
@@ -718,6 +747,7 @@
         toast('自動コピーに失敗しました。下の欄から手動でコピーしてください');
       }
     },
+    setup: (el) => { state = seedState(el.dataset.v); firstRun = false; save(); render(); },
     aiCount: (el) => { aiCount = Number(el.dataset.v); render(); },
     copyPrompt: async () => {
       const scene = aiScene.trim();
@@ -734,7 +764,7 @@
     importText: () => importJSON(document.getElementById('import-text').value),
     reset: () => {
       if (confirm('登録したフレーズと学習記録をすべて消して、初期の15フレーズに戻します。よろしいですか？')) {
-        stop(); state = seedState(); save(); toast('初期状態に戻しました'); render();
+        stop(); state = seedState(state.settings.speaker); save(); toast('初期状態に戻しました'); render();
       }
     },
   };
